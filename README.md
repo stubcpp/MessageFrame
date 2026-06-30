@@ -456,6 +456,51 @@ That is, _flat-variants are not a separate functionality, but the same method,
 just one step closer to the internal implementation, for cases when the user wants 
 to manage the key himself and avoid unnecessary string concatenation on the hot path.
 
+### What does clear() do
+
+The `clear()` method is not used to prevent memory leaks — the destructor will clean everything up 
+once the object goes out of scope. Its main purpose is to allow **reusing the same MessageFrame** 
+for multiple consecutive messages without creating a new object each time.
+
+If you create a MessageFrame once outside the loop and then fill it in each iteration, 
+you must call `clear()` after every send. Otherwise, new parameters will simply be appended 
+to the old ones, resulting in duplicates.
+
+`clear()` always resets the container back to vector mode. If it previously switched to map mode 
+after exceeding `SMALL_CAPACITY`, after `clear()` it starts again in vector mode and will 
+re‑convert to map once the limit is exceeded again.
+
+Here’s a short example of correct usage of clear() inside a loop:
+
+```cpp
+#include <messageframe/MessageFrame.hpp>
+#include <vector>
+
+int main() {
+    msgframe::MessageFrame msg(
+        /*id=*/1001,
+        /*type=*/1,
+        /*flags=*/0,
+        /*version=*/1,
+        /*seq=*/1);
+
+    std::vector<uint8_t> buffer;
+
+    while (running) {
+        // Fill the message with parameters
+        msg.add("sensor_alpha", "voltage", msgframe::VALUE(12.6));
+        msg.add("device_core", "fw_version", msgframe::VALUE("v3.2.1"));
+
+        // Serialize and send
+        buffer.clear();
+        msg.serialize(buffer);
+        send(buffer);
+
+        // Reset before next iteration
+        msg.clear();  // REQUIRED to avoid accumulating duplicates
+    }
+}
+```
 
 ## 🤝 Contributing
 

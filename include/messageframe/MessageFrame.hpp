@@ -31,26 +31,26 @@ class MessageFrame {
         // ----------------------------------------------------------------
         // Proxy methods for HybridMessageMap (Redirect to parameters)
         //
-        // Кожен метод дублюється в lvalue (const ParameterValue&) і rvalue
-        // (ParameterValue&&) версіях — так само, як у HybridMessageMap.
-        // Це навмисно: один by-value overload виглядав би простіше, але
-        // примусив би компілятор робити КОПІЮ ParameterValue на вході для
-        // lvalue-аргументів (param передається by value -> завжди
-        // copy/move-конструюється), що ламає Zero-Allocation гарантію
-        // бібліотеки саме на рівні публічного фасаду MessageFrame.
+        // Each method is duplicated in lvalue (const ParameterValue&) and rvalue
+        // (ParameterValue&&) versions — exactly as in HybridMessageMap.
+        // This is intentional: a single by-value overload would look simpler, but
+        // would force the compiler to COPY ParameterValue for lvalue arguments
+        // (param passed by value -> always copy/move-constructed), which breaks
+        // the Zero-Allocation guarantee of the library at the public MessageFrame facade.
         // ----------------------------------------------------------------
-
-        // CRITICAL. Повторний add() з тим самим ключем створить дублікат запису в vector-режимі
-        // (поведінка undefined для подальшого find — знайде перший) і призведе до некоректної
-        // поведінки. Використовуйте set() для upsert-семантики.
+        
+        // CRITICAL. Repeated add() with the same key will create a duplicate entry in vector mode
+        // (undefined behavior for subsequent find — it will return the first) and will lead to
+        // incorrect behavior. Use set() for upsert semantics.
         /**
-        * @brief Додає новий параметр без перевірки на наявність дублікатів (Максимум швидкості).
-        * @note Складність: O(1) у векторному режимі (proxy до HybridMessageMap::add).
-        * @warning Якщо ключ уже існує, у збірці Release утвориться дублікат (find() поверне перший).
-        *          У збірці Debug спрацює assert. Використовуйте set() для логіки "вставити або оновити".
-        * @param device Назва пристрою / домену (напр., "sensor_alpha")
-        * @param param Назва метрики (напр., "voltage")
-        * @param val Значення параметра
+        * @brief Adds a new parameter without checking for duplicates (Maximum speed).
+        * @note Complexity: O(1) in vector mode (proxy to HybridMessageMap::add).
+        * @warning If the key already exists, in Release build a duplicate will be created
+        *          (find() will return the first). In Debug build an assert will trigger.
+        *          Use set() for "insert or update" logic.
+        * @param device Name of the device / domain (e.g., "sensor_alpha")
+        * @param param  Name of the metric (e.g., "voltage")
+        * @param val    Parameter value
         */
         void add(std::string_view device, std::string_view param, const ParameterValue& val) {
             parameters.add(device, param, val);
@@ -60,13 +60,14 @@ class MessageFrame {
         }
 
         /**
-        * @brief Додає новий параметр якщо ключ вже об'єднаний ("device.parameter") без перевірки
-        *        на наявність дублікатів (Максимум швидкості).
-        * @note Складність: O(1) у векторному режимі (proxy до HybridMessageMap::add_flat).
-        * @warning Якщо ключ уже існує, у збірці Release утвориться дублікат (find_flat() поверне перший).
-        *          У збірці Debug спрацює assert. Використовуйте set_flat() для логіки "вставити або оновити".
-        * @param flat_key Об'єднаний ключ (напр., "device.parameter")
-        * @param val Значення параметра
+        * @brief Adds a new parameter when the key is already combined ("device.parameter")
+        *        without checking for duplicates (Maximum speed).
+        * @note Complexity: O(1) in vector mode (proxy to HybridMessageMap::add_flat).
+        * @warning If the key already exists, in Release build a duplicate will be created
+        *          (find_flat() will return the first). In Debug build an assert will trigger.
+        *          Use set_flat() for "insert or update" logic.
+        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param val      Parameter value
         */
         void add_flat(std::string_view flat_key, const ParameterValue& val) {
             parameters.add_flat(flat_key, val);
@@ -76,12 +77,12 @@ class MessageFrame {
         }
 
         /**
-        * @brief Семантика Upsert: Оновлює значення, якщо ключ уже існує, або додає новий.
-        * @note Складність: у векторному режимі O(N) (лінійний пошук дубліката), у режимі мапи O(1)
-        *       (proxy до HybridMessageMap::set).
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @param val Нове значення для запису/оновлення
+        * @brief Upsert semantics: Updates the value if the key already exists, or adds a new one.
+        * @note Complexity: in vector mode O(N) (linear duplicate search), in map mode O(1)
+        *       (proxy to HybridMessageMap::set).
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @param val    New value to insert or update
         */
         void set(std::string_view device, std::string_view param, const ParameterValue& val) {
             parameters.set(device, param, val);
@@ -91,12 +92,12 @@ class MessageFrame {
         }
 
         /**
-        * @brief Семантика Upsert: Оновлює значення, якщо ключ уже існує, або додає новий
-        *        (об'єднаний ключ "device.param").
-        * @note Складність: у векторному режимі O(N) (лінійний пошук дубліката), у режимі мапи O(1)
-        *       (proxy до HybridMessageMap::set_flat).
-        * @param flat_key Об'єднаний ключ (напр., "device.parameter")
-        * @param val Нове значення для запису/оновлення
+        * @brief Upsert semantics: Updates the value if the key already exists, or adds a new one
+        *        (combined key "device.param").
+        * @note Complexity: in vector mode O(N) (linear duplicate search), in map mode O(1)
+        *       (proxy to HybridMessageMap::set_flat).
+        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param val      New value to insert or update
         */
         void set_flat(std::string_view flat_key, const ParameterValue& val) {
             parameters.set_flat(flat_key, val);
@@ -106,13 +107,13 @@ class MessageFrame {
         }
 
         /**
-        * @brief Строге оновлення: Модифікує значення ТІЛЬКИ якщо ключ уже існує в контейнері.
-        * @note Метод ніколи не збільшує кількість параметрів та не створює нових записів
-        *       (proxy до HybridMessageMap::update).
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @param val Нове значення для існуючого параметра
-        * @return true — значення успішно оновлено; false — такий ключ не знайдено (структура не змінилась).
+        * @brief Strict update: Modifies the value ONLY if the key already exists in the container.
+        * @note This method never increases the number of parameters and never creates new entries
+        *       (proxy to HybridMessageMap::update).
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @param val    New value for the existing parameter
+        * @return true — value successfully updated; false — such key not found (structure unchanged).
         */
         bool update(std::string_view device, std::string_view param, const ParameterValue& val) {
             return parameters.update(device, param, val);
@@ -122,13 +123,13 @@ class MessageFrame {
         }
 
         /**
-        * @brief Строге оновлення: Модифікує значення ТІЛЬКИ якщо ключ уже існує в контейнері
-        *        (об'єднаний ключ "device.param").
-        * @note Метод ніколи не збільшує кількість параметрів та не створює нових записів
-        *       (proxy до HybridMessageMap::update_flat).
-        * @param flat_key Об'єднаний ключ (напр., "device.parameter")
-        * @param val Нове значення для існуючого параметра
-        * @return true — значення успішно оновлено; false — такий ключ не знайдено (структура не змінилась).
+        * @brief Strict update: Modifies the value ONLY if the key already exists in the container
+        *        (combined key "device.param").
+        * @note This method never increases the number of parameters and never creates new entries
+        *       (proxy to HybridMessageMap::update_flat).
+        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param val      New value for the existing parameter
+        * @return true — value successfully updated; false — such key not found (structure unchanged).
         */
         bool update_flat(std::string_view flat_key, const ParameterValue& val) {
             return parameters.update_flat(flat_key, val);
@@ -138,40 +139,68 @@ class MessageFrame {
         }
 
         /**
-        * @brief Пошук параметра без створення тимчасового std::string (Zero-Allocation find).
-        * @note Складність: O(N) у векторному режимі (лінійне порівняння), O(1) у режимі мапи.
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @return Вказівник на знайдене значення, або nullptr якщо ключ не знайдено.
+        * @brief Finds a parameter without creating a temporary std::string (Zero-Allocation find).
+        * @note Complexity: O(N) in vector mode (linear comparison), O(1) in map mode.
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @return Pointer to the found value, or nullptr if the key is not found.
         */
         const ParameterValue* find(std::string_view device, std::string_view param) const noexcept {
             return parameters.find(device, param);
         }
 
         /**
-        * @brief Пошук параметра за об'єднаним ключем ("device.param") без створення тимчасового
-        *        std::string (Zero-Allocation find).
-        * @note Складність: O(N) у векторному режимі (лінійне порівняння), O(1) у режимі мапи.
-        * @param flat_key Об'єднаний ключ (напр., "device.parameter")
-        * @return Вказівник на знайдене значення, або nullptr якщо ключ не знайдено.
+        * @brief Finds a parameter by its combined key ("device.param") without creating
+        *        a temporary std::string (Zero-Allocation find).
+        * @note Complexity: O(N) in vector mode (linear comparison), O(1) in map mode.
+        * @param flat_key Combined key (e.g., "device.parameter")
+        * @return Pointer to the found value, or nullptr if the key is not found.
         */
         const ParameterValue* find_flat(std::string_view flat_key) const noexcept {
             return parameters.find_flat(flat_key);
         }
 
-        // Working with large binary attachments
+        /**
+        * @brief Adds a large binary attachment to the message.
+        * @note Attachments bypass the parameter map — bulk data is stored directly.
+        * @param name Logical name of the attachment (e.g., "raw_iq_stream").
+        * @param data Binary payload to attach (moved into the container).
+        */
         void add_attachment(std::string name, std::vector<uint8_t> data);
+
+        /**
+         * @brief Provides read-only access to all attachments of the message.
+         * @return Const reference to the vector of attachments.
+         */
         const std::vector<Attachment>& get_attachments() const noexcept { return attachments; }
 
-        // Повертає поточну кількість параметрів у повідомленні
+        /**
+        * @brief Returns the current number of parameters in the message.
+        * @return Count of parameters stored in the container.
+        */
         size_t parameters_size() const noexcept { return parameters.size(); }
 
-        // Доступ до ітератора для обходу
+        /**
+         * @brief Provides an iterator-style traversal of all parameters.
+         * @note Invokes the given callback for each parameter without extra allocations.
+         * @param callback Function pointer called for every parameter.
+         * @param user_data Optional user context passed to the callback.
+         */
         void iterate_parameters(HybridMessageMap::ConstCallback callback, void* user_data) const {
             parameters.iterate(callback, user_data);
         }
 
-
+        /**
+        * @brief Clears the message for reusing the same object.
+        * @note Does not release the allocated capacity of the parameter container —
+        *       repeated clear()+add() cycles within the same element count do not
+        *       trigger new allocations. Always resets the container back to vector mode,
+        *       even if it previously switched to map mode.
+        * @warning Always call clear() before refilling the same MessageFrame object —
+        *          otherwise add() will append new parameters to the existing ones
+        *          (duplicates), instead of replacing the previous set. If you create
+        *          a new MessageFrame for each message, clear() is not needed.
+        */
         void clear() noexcept;
 
         // Network serialization

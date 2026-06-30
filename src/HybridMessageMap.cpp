@@ -13,7 +13,6 @@ namespace msgframe {
     // MapImpl (Implementation of pImpl for tsl::robin_map)
     // Uses a flat string as the only key, storing ParameterValue
     struct HybridMessageMap::MapImpl {
-        //tsl::robin_map<std::string, ParameterValue> map;
         tsl::robin_map<std::string, ParameterValue, StringViewHash, std::equal_to<>> map;
     };
 
@@ -28,16 +27,16 @@ namespace msgframe {
         if (is_flat_map) {
             if (vector_storage.size() >= SMALL_CAPACITY) {
                 convert_to_map();
-                // Код іде далі вниз і додає елемент у мапу
+                // Code continues below and adds the element into the map
             }
             else {
-                // std::forward збереже тип: зробить move для rvalue і копію для lvalue!
+                // std::forward preserves the type: performs move for rvalue and copy for lvalue!
                 vector_storage.push_back({ FlatKey{ std::string(flat_key) }, std::forward<T>(val) });
                 return;
             }
         }
 
-        // Швидка передача в мапу
+        // Fast insertion into the map
         map_storage->map.emplace(std::string(flat_key), std::forward<T>(val));
     }
 
@@ -48,7 +47,7 @@ namespace msgframe {
                 [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
 
             if (it != vector_storage.end()) {
-                it->second = std::forward<T>(val); // Upsert-оновлення у векторі
+                it->second = std::forward<T>(val); // Upsert-updating in the vector
                 return;
             }
 
@@ -61,7 +60,7 @@ namespace msgframe {
             }
         }
 
-        // Вставка або заміна у мапі. insert_or_assign ідеально підходить для модифікації ключів
+        // Insert or replace in a map. insert_or_assign is ideal for modifying keys
         map_storage->map.insert_or_assign(std::string(flat_key), std::forward<T>(val));
     }
 
@@ -79,13 +78,13 @@ namespace msgframe {
             auto it = map_storage->map.find(flat_key);
             if (it == map_storage->map.end()) return false;
 
-            // Щоб обійти константність ітератора і змусити мапу виконати легальну low-latency заміну:
+            // To bypass iterator constancy and force the map to perform a legal low-latency replacement:
             map_storage->map.insert_or_assign(it->first, std::forward<T>(val));
             return true;
         }
     }
 
-    // Явна інстанціація шаблонів для двох типів, з якими реально викликаються ці шаблони
+    // Explicit instantiation of templates for the two types with which these templates are actually called
     template void HybridMessageMap::add_flat_impl<const ParameterValue&>(std::string_view, const ParameterValue&);
     template void HybridMessageMap::add_flat_impl<ParameterValue>(std::string_view, ParameterValue&&);
     template void HybridMessageMap::set_flat_impl<const ParameterValue&>(std::string_view, const ParameterValue&);
@@ -121,21 +120,21 @@ namespace msgframe {
 
     // Zero-Allocation key collection via stack with Small String Optimization (SSO)
     void HybridMessageMap::add(std::string_view device, std::string_view param, const ParameterValue& val) {
-        // Реалізація для lvalue (копіюємо тільки в момент вставки в контейнер)
+        // Implementation for lvalue (copy only when pasting into the container)
         add_impl(device, param, val);
     }
         
     void HybridMessageMap::add(std::string_view device, std::string_view param, ParameterValue&& val) {
-        // Реалізація для rvalue (максимальний Low-Latency шлях, 0 копіювань!)
+        // Implementation for rvalue (maximum Low-Latency path, 0 copies!)
         add_impl(device, param, std::move(val));
     }
 
     void HybridMessageMap::add_flat(std::string_view flat_key, const ParameterValue& val) {
-        add_flat_impl(flat_key, val); // Передасться як const&
+        add_flat_impl(flat_key, val); // Passed as const&
     }
 
     void HybridMessageMap::add_flat(std::string_view flat_key, ParameterValue&& val) {
-        add_flat_impl(flat_key, std::move(val)); // Передасться як &&
+        add_flat_impl(flat_key, std::move(val)); // Passed as &&
     }
 
     void HybridMessageMap::set(std::string_view device, std::string_view param, const ParameterValue& val) {
@@ -172,10 +171,10 @@ namespace msgframe {
     
     const ParameterValue* HybridMessageMap::find(std::string_view device, std::string_view param) const noexcept {
         if (is_flat_map) {
-            // Шукаємо у векторі без створення жодного тимчасового рядка.
+            // Searching the vector without creating any temporary strings.
             for (const auto& pair : vector_storage) {
                 const std::string& key = pair.first.full_key;
-                // Швидка перевірка: довжина та розділова крапка
+                // Quick check: length and delimiter
                 if (key.size() == device.size() + 1 + param.size() &&
                     key.compare(0, device.size(), device) == 0 &&
                     key[device.size()] == '.' &&
@@ -251,7 +250,7 @@ namespace msgframe {
 
     // MessagePack parameter map serialization
     void HybridMessageMap::pack(void* packer_ptr) const {
-        // Замість конкретного sbuffer використовуємо абстрактний шаблонний інтерфейс обгортки
+        // Instead of a concrete sbuffer, we use an abstract template wrapper interface
         auto* pk = static_cast<msgpack::packer<VectorBuffer>*>(packer_ptr);
 
         pk->pack_map(size());
@@ -300,11 +299,4 @@ namespace msgframe {
             }
         }
     }
-
-    
-
-    
-
-    
-
 } // namespace msgframe

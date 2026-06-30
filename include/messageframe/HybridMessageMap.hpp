@@ -25,50 +25,55 @@ namespace msgframe {
         HybridMessageMap& operator=(HybridMessageMap&&) noexcept;
 
         // Adding parameters (Zero-Allocation)
-        // CRITICAL. Повторний add() з тим самим ключем створить дублікат запису в vector - режимі (поведінка undefined для подальшого find — знайде перший) 
-        // і призведе до некоректної поведінки. Використовуйте set() для upsert - семантики
+        // CRITICAL. Repeated add() with the same key will create a duplicate entry
+        // in vector mode (undefined behavior for subsequent find — it will return the first)
+        // and will lead to incorrect behavior. Use set() for upsert semantics.
         /**
-        * @brief Додає новий параметр без перевірки на наявність дублікатів (Максимум швидкості).
-        * @note Складність: O(1). У векторному режимі робить чистий push_back.
-        * @warning Якщо ключ уже існує, у збірці Release утвориться дублікат (find() поверне перший).
-        *          У збірці Debug спрацює assert. Використовуйте set() для логіки "вставити або оновити".
-        * @param device Назва пристрою / домену (напр., "sensor_alpha")
-        * @param param Назва метрики (напр., "voltage")
-        * @param val Значення параметра
+        * @brief Adds a new parameter without checking for duplicates (Maximum speed).
+        * @note Complexity: O(1). In vector mode it performs a pure push_back.
+        * @warning If the key already exists, in Release build a duplicate will be created
+        *          (find() will return the first). In Debug build an assert will trigger.
+        *          Use set() for "insert or update" logic.
+        * @param device Name of the device / domain (e.g., "sensor_alpha")
+        * @param param  Name of the metric (e.g., "voltage")
+        * @param val    Parameter value
         */
-        void add(std::string_view device, std::string_view param, const ParameterValue& val); // Для lvalue (звичайних змінних) — робимо const&, щоб не копіювати на вході
-        void add(std::string_view device, std::string_view param, ParameterValue&& val);      // Для rvalue (тимчасових об'єктів / мувнутих змінних) — чистий move
+        void add(std::string_view device, std::string_view param, const ParameterValue& val); // For lvalue (regular variables) — do const& to avoid copying on input
+        void add(std::string_view device, std::string_view param, ParameterValue&& val);      // For rvalue (temporary objects / moved variables) — pure move
         template<typename T>
         void add_impl(std::string_view device, std::string_view param, T&& val) {
             std::string flat_key;
             flat_key.reserve(device.size() + 1 + param.size());
             flat_key.append(device).append(".").append(param);
 
-            // Передаємо як const&, add_flat сам вирішить, коли скопіювати
+            // Pass it as const, add_flat will decide when to copy
             add_flat(flat_key, std::forward<T>(val));
         }
 		
-		// Adding parameters if the key is already collected ("device.parameter")
+        // Adding parameters if the key is already combined ("device.parameter")
         /**
-        * @brief Додає новий параметр якщо ключ вже об'єданий ("device.parameter") без перевірки на наявність дублікатів (Максимум швидкості).
-        * @note Складність: O(1). У векторному режимі робить чистий push_back.
-        * @warning Якщо ключ уже існує, у збірці Release утвориться дублікат (find() поверне перший).
-        *          У збірці Debug спрацює assert. Використовуйте set() для логіки "вставити або оновити".
-        * @param flat_key Об'єднаний ключ (напр., "device.parameter")
-        * @param val Значення параметра
+        * @brief Adds a new parameter when the key is already combined ("device.parameter")
+        *        without checking for duplicates (Maximum speed).
+        * @note Complexity: O(1). In vector mode it performs a pure push_back.
+        * @warning If the key already exists, in Release build a duplicate will be created
+        *          (find() will return the first). In Debug build an assert will trigger.
+        *          Use set() for "insert or update" logic.
+        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param val      Parameter value
         */
 		void add_flat(std::string_view flat_key, const ParameterValue& val);
         void add_flat(std::string_view flat_key, ParameterValue&& val);
         template<typename T>
         void add_flat_impl(std::string_view flat_key, T&& val);
 
-        // Upsert: оновлює значення, якщо ключ існує; інакше додає новий (повільніше за add() — лінійний пошук у vector-режимі)
+        // Upsert: updates the value if the key exists; otherwise adds a new one
+        // (slower than add() — linear search in vector mode)
         /**
-        * @brief Семантика Upsert: Оновлює значення, якщо ключ уже існує, або додає новий.
-        * @note Складність: у векторному режимі O(N) (лінійний пошук дубліката), у режимі мапи O(1).
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @param val Нове значення для запису/оновлення
+        * @brief Upsert semantics: Updates the value if the key already exists, or adds a new one.
+        * @note Complexity: in vector mode O(N) (linear duplicate search), in map mode O(1).
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @param val    New value to insert or update
         */
         void set(std::string_view device, std::string_view param, const ParameterValue& val);
         void set(std::string_view device, std::string_view param, ParameterValue&& val);
@@ -80,28 +85,28 @@ namespace msgframe {
             set_flat(flat_key, std::forward<T>(val));
         }
 
-        // Upsert: оновлює значення для об'єднаного ключа ("device.param"), якщо ключ існує; 
-        // інакше додає новий (повільніше за add() — лінійний пошук у vector-режимі)
+        // Upsert: updates the value for a combined key ("device.param") if the key exists;
+        // otherwise adds a new one (slower than add() — linear search in vector mode)
         /**
-        * @brief Семантика Upsert: Оновлює значення, якщо ключ уже існує, або додає новий.
-        * @note Складність: у векторному режимі O(N) (лінійний пошук дубліката), у режимі мапи O(1).
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @param val Нове значення для запису/оновлення
+        * @brief Upsert semantics: Updates the value if the key already exists, or adds a new one.
+        * @note Complexity: in vector mode O(N) (linear duplicate search), in map mode O(1).
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @param val    New value to insert or update
         */
         void set_flat(std::string_view flat_key, const ParameterValue& val);
         void set_flat(std::string_view flat_key, ParameterValue&& val);
         template<typename T>
         void set_flat_impl(std::string_view flat_key, T&& val);
 
-        // Strict update: оновлює лише існуючий ключ. Повертає false, якщо ключ не знайдено (значення не змінюється)
+        // Strict update: updates only an existing key. Returns false if the key is not found (value remains unchanged)
         /**
-        * @brief Строге оновлення: Модифікує значення ТІЛЬКИ якщо ключ уже існує в контейнері.
-        * @note Метод ніколи не збільшує розмір контейнера та не створює нових записів.
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @param val Нове значення для існуючого параметра
-        * @return true — значення успішно оновлено; false — такий ключ не знайдено (структура не змінилась).
+        * @brief Strict update: Modifies the value ONLY if the key already exists in the container.
+        * @note This method never increases the container size and never creates new entries.
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @param val    New value for the existing parameter
+        * @return true — value successfully updated; false — such key not found (structure unchanged).
         */
         bool update(std::string_view device, std::string_view param, const ParameterValue& val);
         bool update(std::string_view device, std::string_view param, ParameterValue&& val);
@@ -113,15 +118,15 @@ namespace msgframe {
             return update_flat(flat_key, std::forward<T>(val));
         }
 
-        // Strict update: оновлює лише існуючий ключ (об'єднаний ключ "device.param"). 
-        // Повертає false, якщо ключ не знайдено (значення не змінюється).
+        // Strict update: updates only an existing key (combined key "device.param").
+        // Returns false if the key is not found (value remains unchanged).
         /**
-        * @brief Строге оновлення: Модифікує значення ТІЛЬКИ якщо ключ уже існує в контейнері.
-        * @note Метод ніколи не збільшує розмір контейнера та не створює нових записів.
-        * @param device Назва пристрою / домену
-        * @param param Назва метрики
-        * @param val Нове значення для існуючого параметра
-        * @return true — значення успішно оновлено; false — такий ключ не знайдено (структура не змінилась).
+        * @brief Strict update: Modifies the value ONLY if the key already exists in the container.
+        * @note This method never increases the container size and never creates new entries.
+        * @param device Name of the device / domain
+        * @param param  Name of the metric
+        * @param val    New value for the existing parameter
+        * @return true — value successfully updated; false — such key not found (structure unchanged).
         */
         bool update_flat(std::string_view flat_key, const ParameterValue& val);
         bool update_flat(std::string_view flat_key, ParameterValue&& val);
