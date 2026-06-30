@@ -103,6 +103,8 @@ per-device struct or serialization code to maintain.
 │   ├── test_hybrid_map.cpp        # HybridMessageMap correctness tests
 │   └── test_messageframe_proxy.cpp # MessageFrame proxy-method tests
 └── CMakeLists.txt
+└── run_benchmark.sh
+└── run_benchmark.bat
 ```
  
 ## Performance Benchmarks
