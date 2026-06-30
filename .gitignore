@@ -1,0 +1,51 @@
+# Build directories
+build/
+build_win/
+out/
+
+# Compiled object files
+*.o
+*.obj
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Libraries
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# Debug / profiling
+*.pdb
+*.idb
+*.prof
+*.gcda
+*.gcno
+*.gcov
+
+# Logs / temp
+*.log
+*.tmp
+
+# JSON configs (if generated)
+*.json
+
+# CMake cache and files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+
+# IDE / editor files
+.vs/
+*.swp
+*.swo
+*.user
+*.vcxproj*
+*.xcodeproj/
+.idea/
+.vscode/
