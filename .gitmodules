@@ -1,9 +1,9 @@
 [submodule "third_party/robin_map"]
-    path = third_party/robin_map
-    url = https://github.com/Tessil/robin-map.git
-    branch = master
+	path = third_party/robin_map
+	url = https://github.com/Tessil/robin-map.git
+	branch = master
 
 [submodule "third_party/msgpack"]
-    path = third_party/msgpack
-    url = https://github.com/msgpack/msgpack-c.git
-    branch = cpp_master
+	path = third_party/msgpack
+	url = https://github.com/msgpack/msgpack-c.git
+	branch = cpp_master
