@@ -106,8 +106,27 @@ int main() {
             std::cout << "Decoded message type: PERIODIC\n";
         }
         if (const auto* val = received.find("sensor_alpha", "voltage")) {
+            auto voltage = val->tryGetDouble(); // voltage is std::optional
+
+            // Option 1: Classic has_value() check
+            if (voltage.has_value()) {
+                double v = *voltage; // or voltage.value()
+                std::cout << "Voltage (has_value): " << v << "\n";
+            }
+
+            // Option 2: value_or() with a default fallback
+            double v2 = voltage.value_or(-1.0);
+            std::cout << "Voltage (value_or): " << v2 << "\n";
+
+            // Option 3: Shorthand if(optional)
+            if (voltage) {
+                std::cout << "Voltage (shorthand): " << *voltage << "\n";
+            }
+
+            // Additionally, you can use toString() for universal output
             std::cout << "Decoded sensor_alpha.voltage: " << val->toString() << "\n";
         }
+
     }
 
     return 0;
