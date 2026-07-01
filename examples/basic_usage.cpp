@@ -1,9 +1,21 @@
-// examples/basic_usage.cpp
+// ============================================================================
+// Project: MessageFrame Library
+// File:    examples/basic_usage.cpp
+// Author:  Serjio
+// Copyright (c) 2026 Serjio
+// SPDX-License-Identifier: MIT
 //
-// Extended example of using the MessageFrame library.
-// Goal: demonstrate the core API in a single file — creation, parameters,
-// lookup, iteration, attachments, serialization, and deserialization.
-// For performance benchmarks, see benchmarks/benchmark.cpp.
+// Description:
+//   Extended example of using the MessageFrame library.
+//   Goal: demonstrate the core API in a single file — creation, parameters,
+//   lookup, iteration, attachments, serialization, and deserialization.
+//   For performance benchmarks, see benchmarks/benchmark.cpp.
+//
+// License:
+//   This file is part of the MessageFrame library.
+//   See the LICENSE file in the project root for full license information.
+// ============================================================================
+
 
 #include <messageframe/MessageFrame.hpp>
 #include <iostream>

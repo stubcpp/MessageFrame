@@ -1,10 +1,10 @@
 // tests/test_hybrid_map.cpp
 //
-// Юніт-тести коректності HybridMessageMap. Покривають саме ті місця,
-// де вже траплялись реальні баги під час розробки:
-//   - update_flat(ParameterValue&&) без return (UB на rvalue-перевантаженні)
-//   - межовий випадок конвертації vector -> map на SMALL_CAPACITY-му елементі
-//   - heterogeneous lookup через std::string_view без зайвої std::string-алокації
+// Unit tests for correctness of HybridMessageMap. Covers exactly those places,
+// where real bugs have already occurred during development:
+// - update_flat(ParameterValue&&) without return (UB on rvalue overloading)
+// - edge case of vector -> map conversion on SMALL_CAPACITY-th element
+// - heterogeneous lookup via std::string_view without unnecessary std::string allocation
 
 #include "test_framework.hpp"
 #include <messageframe/HybridMessageMap.hpp>
@@ -15,7 +15,7 @@ using msgframe::HybridMessageMap;
 using msgframe::ParameterValue;
 
 // --------------------------------------------------------------------
-// Group: AddFind — базовий round-trip у vector-режимі (< SMALL_CAPACITY)
+// Group: AddFind — basic round-trip in vector mode (< SMALL_CAPACITY)
 // --------------------------------------------------------------------
 
 TEST(AddFind, LvalueAddIsFoundByDeviceParam) {
@@ -66,13 +66,13 @@ TEST(AddFind, ClearEmptiesContainerAndResetsToVectorMode) {
     CHECK_EQ(map.size(), static_cast<size_t>(0));
     CHECK_NULL(map.find("dev", "p1"));
 
-    // Після clear() контейнер має знову приймати елементи нормально
+    // After clear() the container should accept elements normally again
     map.add("dev", "p1", ParameterValue(5.0));
     CHECK_EQ(map.size(), static_cast<size_t>(1));
 }
 
 // --------------------------------------------------------------------
-// Group: MapConversion — межовий випадок vector -> map на SMALL_CAPACITY
+// Group: Map Conversion — the edge case of vector -> map on SMALLer CAPACITY
 // --------------------------------------------------------------------
 
 TEST(MapConversion, StaysInVectorModeBelowCapacity) {
@@ -82,7 +82,7 @@ TEST(MapConversion, StaysInVectorModeBelowCapacity) {
     }
     CHECK_EQ(map.size(), HybridMessageMap::SMALL_CAPACITY);
 
-    // Усі SMALL_CAPACITY елементів мають бути знайдені до конвертації
+    // All SMALL_CAPACITY elements must be found before conversion
     for (size_t i = 0; i < HybridMessageMap::SMALL_CAPACITY; ++i) {
         std::string param = "p" + std::to_string(i);
         const auto* found = map.find("dev", param);
@@ -92,7 +92,7 @@ TEST(MapConversion, StaysInVectorModeBelowCapacity) {
 
 TEST(MapConversion, ConvertsToMapModeOnceCapacityExceeded) {
     HybridMessageMap map;
-    // SMALL_CAPACITY + кілька елементів -> примусово переходимо в map-режим
+    // SMALL_CAPACITY + several elements -> force switch to map mode
     const size_t count = HybridMessageMap::SMALL_CAPACITY + 10;
     for (size_t i = 0; i < count; ++i) {
         map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<double>(i)));
@@ -100,8 +100,8 @@ TEST(MapConversion, ConvertsToMapModeOnceCapacityExceeded) {
 
     CHECK_EQ(map.size(), count);
 
-    // Перевіряємо елементи з обох боків межі конвертації:
-    // ті, що були додані ДО переходу в map-режим, і ПІСЛЯ.
+    // Check the elements on both sides of the conversion boundary:
+    // those that were added BEFORE the transition to map mode, and AFTER.
     const auto* before_boundary = map.find("dev", "p0");
     const auto* at_boundary = map.find("dev", "p" + std::to_string(HybridMessageMap::SMALL_CAPACITY - 1));
     const auto* after_boundary = map.find("dev", "p" + std::to_string(HybridMessageMap::SMALL_CAPACITY));
@@ -114,9 +114,9 @@ TEST(MapConversion, ConvertsToMapModeOnceCapacityExceeded) {
 }
 
 TEST(MapConversion, FindFlatWorksAfterConversionViaStringView) {
-    // Регресійний тест саме на heterogeneous lookup: переконуємось, що
-    // find_flat зі string_view знаходить елемент у map-режимі без
-    // потреби явно конструювати std::string на боці викликаючого коду.
+    // Regression test specifically for heterogeneous lookup: we make sure that
+    // find_flat with string_view finds an element in map mode without
+    // the need to explicitly construct a std::string on the calling code side.
     HybridMessageMap map;
     const size_t count = HybridMessageMap::SMALL_CAPACITY + 5;
     for (size_t i = 0; i < count; ++i) {
@@ -124,7 +124,7 @@ TEST(MapConversion, FindFlatWorksAfterConversionViaStringView) {
     }
 
     std::string owned_key = "dev." + std::to_string(count - 1);
-    std::string_view view_key = owned_key; // чистий view, без володіння
+    std::string_view view_key = owned_key; // pure view, no ownership
 
     const auto* found = map.find_flat(view_key);
     CHECK_NOT_NULL(found);
@@ -136,8 +136,8 @@ TEST(MapConversion, FindFlatWorksAfterConversionViaStringView) {
 }
 
 // --------------------------------------------------------------------
-// Group: UpdateSemantics — strict update(): саме тут раніше губився
-// return у rvalue-перевантаженні update_flat(ParameterValue&&)
+// Group: UpdateSemantics — strict update(): this is where it got lost before
+// return in rvalue overload update_flat(ParameterValue&&)
 // --------------------------------------------------------------------
 
 TEST(UpdateSemantics, UpdateExistingKeyLvalueReturnsTrueAndChangesValue) {
@@ -158,9 +158,9 @@ TEST(UpdateSemantics, UpdateExistingKeyLvalueReturnsTrueAndChangesValue) {
 }
 
 TEST(UpdateSemantics, UpdateExistingKeyRvalueReturnsTrueAndChangesValue) {
-    // Це саме той випадок, де колись був забутий `return` у
-    // update_flat(std::string_view, ParameterValue&&) — функція
-    // повертала непередбачуване значення (UB) замість true.
+    // This is exactly the case where `return` was once forgotten in
+    // update_flat(std::string_view, ParameterValue&&) — function
+    // which returned an unexpected value (UB) instead of true.
     HybridMessageMap map;
     map.add("dev", "voltage", ParameterValue(1.0));
 
@@ -197,9 +197,9 @@ TEST(UpdateSemantics, UpdateMissingKeyRvalueReturnsFalseAndDoesNotInsert) {
 }
 
 TEST(UpdateSemantics, UpdateRvalueInMapModeReturnsTrueForExistingKey) {
-    // Той самий rvalue-update-без-return баг, але вже у map-режимі
-    // (гілка update_flat_impl, що йде через map_storage->map.find,
-    // а не через vector_storage).
+    // The same rvalue-update-without-return bug, but in map mode
+    // (the update_flat_impl branch goes through map_storage->map.find,
+    // and not through vector_storage).
     HybridMessageMap map;
     const size_t count = HybridMessageMap::SMALL_CAPACITY + 5;
     for (size_t i = 0; i < count; ++i) {
@@ -222,7 +222,7 @@ TEST(UpdateSemantics, UpdateRvalueInMapModeReturnsTrueForExistingKey) {
 }
 
 // --------------------------------------------------------------------
-// Group: SetSemantics — upsert: оновлює існуючий або додає новий
+// Group: SetSemantics — upsert: updates an existing one or adds a new one
 // --------------------------------------------------------------------
 
 TEST(SetSemantics, SetOnMissingKeyInsertsNewEntry) {
@@ -239,7 +239,7 @@ TEST(SetSemantics, SetOnExistingKeyOverwritesWithoutDuplicating) {
     map.add("dev", "voltage", ParameterValue(5.0));
     map.set("dev", "voltage", ParameterValue(9.0));
 
-    // Не повинно з'явитись дублікату — size лишається 1
+    // There should be no duplicate — size remains 1
     CHECK_EQ(map.size(), static_cast<size_t>(1));
     const auto* found = map.find("dev", "voltage");
     CHECK_NOT_NULL(found);
@@ -251,7 +251,7 @@ TEST(SetSemantics, SetOnExistingKeyOverwritesWithoutDuplicating) {
 }
 
 // --------------------------------------------------------------------
-// Group: Iterate — обхід контейнера в обох режимах
+// Group: Iterate — traverse the container in both modes
 // --------------------------------------------------------------------
 
 namespace {

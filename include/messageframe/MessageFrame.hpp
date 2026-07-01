@@ -1,4 +1,17 @@
-// MESSAGE FRAME MAIN CLASS
+// ============================================================================
+// Project: MessageFrame Library
+// File:    MessageFrame.hpp
+// Author:  Serjio
+// Copyright (c) 2026 Serjio
+// SPDX-License-Identifier: MIT
+//
+// Description:
+//   Message frame main class
+//
+// License:
+//   This file is part of the MessageFrame library.
+//   See the LICENSE file in the project root for full license information.
+// ============================================================================
 #pragma once
 #include "messageframe/Structures.hpp"
 #include "messageframe/Header.hpp"   

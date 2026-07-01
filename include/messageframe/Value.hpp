@@ -1,3 +1,17 @@
+// ============================================================================
+// Project: MessageFrame Library
+// File:    Value.hpp
+// Author:  Serjio
+// Copyright (c) 2026 Serjio
+// SPDX-License-Identifier: MIT
+//
+// Description:
+//   Shared types (FlatKey, Attachment, VectorBuffer)
+//
+// License:
+//   This file is part of the MessageFrame library.
+//   See the LICENSE file in the project root for full license information.
+// ============================================================================
 #pragma once
 #include <string>
 #include <optional>
@@ -54,7 +68,7 @@ namespace msgframe {
     private:
         void reset() noexcept;
 		
-		// Допоміжні методи для безпечного доступу до рядка всередині буфера
+		// Helper methods for safely accessing a string inside a buffer
         std::string& as_string() noexcept {
             return *reinterpret_cast<std::string*>(value.stringBuffer);
         }
@@ -64,7 +78,7 @@ namespace msgframe {
 
         Type type{Type::Unknown};
         
-        // використовуємо вирівняний сирий буфер під розмір std::string.
+        // Using a raw buffer aligned to the size of std::string.
         union ValueUnion {
             int64_t intValue;
             double doubleValue;

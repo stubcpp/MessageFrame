@@ -1,3 +1,17 @@
+// ============================================================================
+// Project: MessageFrame Library
+// File:    HybridMessageMap.hpp
+// Author:  Serjio
+// Copyright (c) 2026 Serjio
+// SPDX-License-Identifier: MIT
+//
+// Description:
+//   Hybrid container (hybrid message map)
+//
+// License:
+//   This file is part of the MessageFrame library.
+//   See the LICENSE file in the project root for full license information.
+// ============================================================================
 #pragma once
 #include "messageframe/Structures.hpp"
 #include "messageframe/Value.hpp"
@@ -8,7 +22,6 @@
 #include <algorithm>   
 #include <cassert> 
 
-// HYBRID CONTAINER (HYBRID MESSAGE MAP)
 
 namespace msgframe {
     class HybridMessageMap {

@@ -1,16 +1,26 @@
-// tests/test_framework.hpp
+// ============================================================================
+// Project: MessageFrame Library
+// File:    tests/test_framework.hpp
+// Author:  Serjio
+// Copyright (c) 2026 Serjio
+// SPDX-License-Identifier: MIT
 //
-// Мінімальний zero-dependency test harness. Без GoogleTest/Catch2 —
-// у дусі бібліотеки: мінімум залежностей, швидка компіляція, простий вивід.
-//
-// Використання:
+// Description:
+//   Minimal zero-dependency test harness. Without GoogleTest/Catch2 — 
+//   in the spirit of the library: minimum dependencies, fast compilation, simple output.
+// 
+// Using:
 //   TEST(group_name, test_name) {
 //       CHECK(condition);
 //       CHECK_EQ(actual, expected);
 //   }
 //   ...
 //   int main() { return msgframe_test::run_all(); }
-
+//
+// License:
+//   This file is part of the MessageFrame library.
+//   See the LICENSE file in the project root for full license information.
+// ============================================================================
 #pragma once
 #include <iostream>
 #include <string>
@@ -30,16 +40,16 @@ struct Failure {
     std::string message;
 };
 
-// Глобальний реєстр тестів. inline-функція, щоб уникнути ODR-проблем
-// при включенні цього хедера в кілька .cpp файлів тестів.
+// Global test registry. inline function to avoid ODR problems
+// when including this header in multiple .cpp test files.
 inline std::vector<TestCase>& registry() {
     static std::vector<TestCase> tests;
     return tests;
 }
 
-// Поточний список провалів усередині тесту, що виконується.
-// Один тест може мати кілька CHECK() — не зупиняємось на першому провалі,
-// щоб одразу побачити всі проблеми в тесті за один прогін.
+// The current list of failures within the running test.
+// A single test can have multiple CHECK()s — we don't stop at the first failure,
+// to see all the problems in the test in one run.
 inline std::vector<std::string>& current_failures() {
     static std::vector<std::string> failures;
     return failures;
@@ -110,9 +120,9 @@ inline int run_all() {
 
 } // namespace msgframe_test
 
-// TEST(group, name) реєструє лямбду в глобальному реєстрі через
-// статичний об'єкт Registrar, що виконується до входу в main()
-// (стандартний паттерн self-registration, як у GoogleTest/Catch2).
+// TEST(group, name) registers the lambda in the global registry via
+// a static Registrar object that is executed before entering main()
+// (standard self-registration pattern, as in GoogleTest/Catch2).
 #define TEST(group, name) \
     static void msgframe_test_##group##_##name(); \
     static ::msgframe_test::Registrar msgframe_registrar_##group##_##name( \

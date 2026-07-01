@@ -1,3 +1,17 @@
+// ============================================================================
+// Project: MessageFrame Library
+// File:    Header.hpp
+// Author:  Serjio
+// Copyright (c) 2026 Serjio
+// SPDX-License-Identifier: MIT
+//
+// Description:
+//   Fixed-size message header
+//
+// License:
+//   This file is part of the MessageFrame library.
+//   See the LICENSE file in the project root for full license information.
+// ============================================================================
 #pragma once
 #include <cstdint>
 #include <chrono>
