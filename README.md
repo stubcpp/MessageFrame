@@ -20,6 +20,11 @@ from key-value parameters, with no schema files and no code generation.
 A single message can also carry heavy binary payloads (IQ samples, spectra,
 raw arrays) alongside its parameters, all in one packet.
 
+**MessageFrame** trades zero-copy access for runtime flexibility. Unlike FlatBuffers, 
+where data is read directly from the buffer without unpacking, MessageFrame performs 
+an explicit deserialize() step to build its parameter map. That's the price of having 
+no .proto files and no code generation — a deliberate trade-off, not an oversight.
+
 ## Core concept: two-part keys
 
 Instead of designing a custom struct for every device or message type, you
