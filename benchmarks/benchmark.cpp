@@ -6,7 +6,14 @@
 #include <iomanip>
 #include <cstdlib>
 #include <cstring>
-#include <intrin.h>
+
+#ifdef _MSC_VER
+    #include <intrin.h>
+#elif defined(__GNUC__) || defined(__clang__)
+    #include <cpuid.h>
+#else
+    #error "Unsupported compiler for high-resolution timing"
+#endif
 
 // Перерахування для красивого тестування строгої типізації хедера
 enum class MyMsgId : int32_t {
@@ -60,13 +67,27 @@ BenchmarkConfig parseArgs(int argc, char** argv) {
     return cfg;
 }
 
+// Універсальна обгортка для CPUID
+void native_cpuid(int cpu_info[4], unsigned int function_id) {
+#ifdef _MSC_VER
+    __cpuid(cpu_info, function_id);
+#elif defined(__GNUC__) || defined(__clang__)
+    // GCC/Clang вимагають передачі посилань на окремі змінні
+    __get_cpuid(function_id,
+                (unsigned int*)&cpu_info[0],
+                (unsigned int*)&cpu_info[1],
+                (unsigned int*)&cpu_info[2],
+                (unsigned int*)&cpu_info[3]);
+#endif
+}
+
 // Get the cpu model name
 std::string get_cpu_model_name() {
     // Масив для збереження результатів інструкції cpuid (регістри EAX, EBX, ECX, EDX)
     int cpu_info[4] = { 0 };
 
     // Перевіряємо, чи підтримує процесор розширені функції cpuid
-    __cpuid(cpu_info, 0x80000000);
+    native_cpuid(cpu_info, 0x80000000);
     unsigned int nExIds = cpu_info[0];
 
     if (nExIds < 0x80000004) {
@@ -77,7 +98,7 @@ std::string get_cpu_model_name() {
 
     // Назва моделі збирається послідовно з трьох функцій: 0x80000002, 0x80000003, 0x80000004
     for (unsigned int i = 0x80000002; i <= 0x80000004; ++i) {
-        __cpuid(cpu_info, i);
+        native_cpuid(cpu_info, i);
 
         // Копіюємо 16 байт з регістрів EAX, EBX, ECX, EDX
         std::memcpy(cpu_brand_string + (i - 0x80000002) * 16, cpu_info, sizeof(cpu_info));
