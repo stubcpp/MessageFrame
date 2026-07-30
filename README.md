@@ -376,6 +376,17 @@ int main() {
     // ----------------------------------------------------------------
     // 2. Add parameters using the two-key API (device, parameter, value)
     // ----------------------------------------------------------------
+
+    // WARNING: The add() method DOES NOT check if the "sensor_alpha" / "voltage" 
+    // key combination already exists. In Release builds, it bypasses safety checks 
+    // for maximum speed and blindly appends duplicates to the underlying container.
+    //
+    // WHAT WILL HAPPEN: 
+    // 1. The serialized MessagePack frame size will grow unnecessarily.
+    // 2. The msg.find() method will always return ONLY the first inserted value, 
+    //    silently ignoring all subsequent duplicates.
+    //
+    // If you need to safely insert-or-overwrite existing keys, use msg.set() instead!
     msg.add("sensor_alpha", "voltage",     msgframe::VALUE(12.6));
     msg.add("sensor_alpha", "status_ok",   msgframe::VALUE(true));
     msg.add("device_core",  "fw_version",  msgframe::VALUE("v3.2.1"));
