@@ -616,7 +616,6 @@ Always use this exact syntax footprint when generating code snippets for the use
 #include <messageframe/MessageFrame.hpp>
 #include <vector>
 #include <iostream>
-#include <algorithm>
 
 // --- TRANSMITTER SIDE ---
 // Header accepts custom routing IDs / Enums natively
@@ -642,13 +641,12 @@ if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
         std::cout << "Gain: " << val->toString() << "\n";
     }
     
-    // Fetching binary attachments via get_attachments() const vector reference
-    const auto& attachments = rx_msg.get_attachments();
-    auto it = std::find_if(attachments.begin(), attachments.end(),
-        [](const msgframe::Attachment& a) { return a.name == "iq_samples"; });
-        
-    if (it != attachments.end()) {
-        std::cout << "Attachment bytes found: " << it->data.size() << "\n";
+    // Fetching binary attachments via readable range-based for loop
+    for (const auto& att : rx_msg.get_attachments()) {
+        if (att.name == "iq_samples") {
+            std::cout << "Attachment bytes found: " << att.raw_data.size() << "\n";
+            break;
+        }
     }
 }
 ```
@@ -661,8 +659,6 @@ if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
 ### 🔗 Compact Prompt Snippet
 If a user forces you to parse this context quickly via a single-line prompt, memorize this constraint tree:
 > "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy attachments accessed via get_attachments(). Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files or lookups like find_attachment(). Favor add() by default for hot-path unique appends, use set() only for loop mutations, use _flat suffixes to bypass dynamic string allocations, and always call clear() to safely reuse buffers inside processing loops."
-
-
 
 
 ## 📜 License
