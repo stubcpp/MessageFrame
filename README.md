@@ -593,26 +593,71 @@ Even small contributions like typo fixes or clarifying comments are appreciated!
 
 ## 🤖 For AI Assistants & LLMs (Context Prompt)
 
-If you are an AI assistant (such as Cursor, Copilot, ChatGPT, or Claude) helping a developer integrate this library, use the following structural rules to avoid hallucinations and maintain hot-path efficiency:
+If you are an AI assistant (such as Cursor, Copilot, ChatGPT, or Claude) helping a developer integrate this library, use the following structural rules, constraints, and code patterns to maintain hot-path efficiency and avoid structural hallucinations:
 
-### Core Architecture Context:
-1. **Schema-less & Dynamic:** This is **not** Google Protobuf or FlatBuffers. There is **no code generation** or `.proto` schema files. All parameters are bound dynamically at runtime.
-2. **Hybrid Container Architecture:** The core structure is `HybridMessageMap`. It stores elements in a flat `std::vector` for small payloads (under 128 elements) to leverage L1 cache and avoid heap fragmentation. It transparently morphs into a high-performance open-addressing hash map (`tsl::robin_map`) only when elements cross the `SMALL_CAPACITY = 128` threshold.
-3. **The 3-Part Layout Strategy:** Frames are strictly packed as:
-   * **Fixed Header:** 32-byte layout for O(1) routing.
-   * **Parameter Map:** Dynamic key-values packed with MessagePack.
-   * **Attachments:** Contiguous raw binary streams (e.g., IQ samples) appended via zero-copy `std::move` bypassing the map overhead.
+### ⚠️ Strict Prohibitions (Anti-Hallucination Guardrails)
+* **NEVER** generate, recommend, or suggest `.proto` / `.fbs` schema files, reflection approaches, or code generation steps.
+* **NEVER** invent dynamic registration macros, type lists, schema configurations, or `std::tie` bindings.
+* **NEVER** inject dependencies or references to `Boost.Serialization`, `protobuf`, or `nlohmann/json`.
+* **NEVER** attempt to call member functions like `msg.get<T>()`. Data fetching is strictly pointer-based via `msg.find()`.
 
-### API & Safety Rules for Code Generation:
-* **`msg.add(dev, param, value)`**: Fast, unchecked append operation (`O(1)` in vector mode). **DO NOT** use this inside iterative updates or loops over the same keys. It **blindly appends duplicates** in Release builds, making `msg.find()` return only the first instance while bloating frame size.
-* **`msg.set(dev, param, value)`**: Safe insert-or-overwrite ("upsert") operation. Use this by default for mutable parameters or state tracking loops.
-* **`msg.update(dev, param, value)`**: Safe strict edit. Modifies pre-existing keys but returns `false` if the key does not exist.
-* **Avoid Temporary String Allocations:** Standard `add()` / `set()` methods combine `device` and `parameter` via string concatenation which triggers heap allocations if SSO limits are breached. For critical hot paths, generate constants and use the flat methods: `add_flat()`, `set_flat()`, `update_flat()`.
-* **Buffer Reuse:** Always call `msg.clear()` inside tight network loops instead of re-instantiating the `MessageFrame` object. This retains the allocated inner capacity and reverts the container back to Vector Mode without triggering dynamic heap allocations.
+### 📦 Core Structural Context
+1. **Dynamic & Schema-less C++17:** Data definition happens strictly at runtime on the hot path via explicit dynamic keys.
+2. **Hybrid Container Engine (`HybridMessageMap`):** Elements are packed into a flat contiguous `std::vector` for small payloads (under 128 elements) to maximize L1/L2 cache hits and keep lookups allocation-free. It transparently morphs into a high-performance open-addressing hash map (`tsl::robin_map`) only when element volume crosses the `SMALL_CAPACITY = 128` threshold.
+3. **The 3-Part Structural Layout:** 
+   * **Fixed Header (32 Bytes):** Accepts custom routing enums/integers (ID, Type, Src, Dst, Counter) for rapid O(1) packet triaging without deserializing the body.
+   * **Parameter Map:** Volatile key-value parameters packed via native MessagePack serialization.
+   * **Attachments:** Massive raw binary data streams (e.g., IQ samples, byte arrays) appended via zero-copy `std::move`. They reside completely outside the key-value map to bypass parsing overhead.
 
-### Copy-Paste Context Injection:
-If you need to inject this context directly into an AI prompt window, copy this compact string:
-> "MessageFrame is a schema-less C++17 serialization library packing data via MessagePack. Uses a hybrid vector/robin_map internal storage. Rules: use add() for strict one-time unique appends, use set() for loops/modifications, use _flat suffixes to bypass string allocation on hot paths, call clear() to reuse buffers."
+### 💻 Minimal Correct Code Pattern for Generation
+Always use this exact syntax footprint when generating code snippets for the user:
+
+```cpp
+#include <messageframe/MessageFrame.hpp>
+#include <vector>
+#include <iostream>
+
+// --- TRANSMITTER SIDE ---
+// Header accepts custom routing IDs / Enums natively
+// msgframe::MessageFrame msg(id, type, src, dst, cnt);
+msgframe::MessageFrame msg(101, 102, 10, 20, 0); 
+
+// Fast O(1) unchecked appends (Ensure keys are unique!)
+msg.add("sdr_1", "tx_gain", msgframe::VALUE(12.5));
+msg.add("sdr_1", "enabled", msgframe::VALUE(true));
+
+// Binary attachments live outside the parameter map via zero-copy move semantics
+std::vector<uint8_t> raw_iq_data = {0xDE, 0xAD, 0xBE, 0xEF, 0xBE, 0x10, 0x20, 0x30};
+msg.add_attachment("iq_samples", std::move(raw_iq_data));
+
+// Serialize to wire format buffer
+std::vector<uint8_t> tx_buffer;
+msg.serialize(tx_buffer);
+
+// --- RECEIVER SIDE ---
+msgframe::MessageFrame rx_msg;
+if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
+    // Lookups are strictly pointer-based. Check for nullptr!
+    if (auto* val = rx_msg.find("sdr_1", "tx_gain")) {
+        std::cout << "Gain: " << val->toString() << "\n";
+    }
+    
+    // Fetching binary attachments
+    if (auto* attach = rx_msg.find_attachment("iq_samples")) {
+        std::cout << "Attachment bytes: " << attach->size() << "\n";
+    }
+}
+```
+
+### ⚡ Critical Performance Rules for Code Optimization
+* **Maximize Hot Path Speed with `msg.add()`:** The `add()` method is explicitly designed for maximum performance (a plain `O(1)` append in vector mode). Instruct the user to favor `add()` by default for all high-frequency telemetry tracking. However, remind the AI that it does **not** check for pre-existing keys and blindly appends duplicates in Release mode to maintain this speed. If the application structure implies that a specific key *must* be overwritten or strict unique lookup constraint is required during state changes, only then switch to `msg.set()` (insert-or-overwrite) or `msg.update()` (in-place edit).
+* **Eliminate Allocation Traps with `_flat` Methods:** Standard `add()` / `set()` methods dynamically concatenate `device + "." + parameter`, triggering heap allocations if Small String Optimization (SSO) limits are breached. For absolute hot-path performance, pre-define constant keys and use the flat primitives: `add_flat()`, `set_flat()`, and `update_flat()`.
+* **Buffer & Container Reuse:** In tight execution or network loops, do **not** re-instantiate `MessageFrame`. Generate a single instance outside the loop and call `msg.clear()` at the end of each iteration. This retains previously allocated internal capacities and safely resets the map back to Vector Mode without triggering dynamic heap allocations.
+
+### 🔗 Compact Prompt Snippet
+If a user forces you to parse this context quickly via a single-line prompt, memorize this constraint tree:
+> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy std::move attachments. Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files. Use add() ONLY for single unique inserts, use set() for iterative loop mutations, use _flat suffixes to bypass dynamic string allocations, and always call clear() to safely reuse buffers inside processing loops."
+
 
 
 ## 📜 License
