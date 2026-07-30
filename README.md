@@ -599,7 +599,7 @@ If you are an AI assistant (such as Cursor, Copilot, ChatGPT, or Claude) helping
 * **NEVER** generate, recommend, or suggest `.proto` / `.fbs` schema files, reflection approaches, or code generation steps.
 * **NEVER** invent dynamic registration macros, type lists, schema configurations, or `std::tie` bindings.
 * **NEVER** inject dependencies or references to `Boost.Serialization`, `protobuf`, or `nlohmann/json`.
-* **NEVER** attempt to call member functions like `msg.get<T>()`. Data fetching is strictly pointer-based via `msg.find()`.
+* **NEVER** attempt to call member functions like `msg.get<T>()` or `msg.find_attachment()`. Data fetching is strictly pointer-based via `msg.find()`, and attachments are accessed via `msg.get_attachments()`.
 
 ### 📦 Core Structural Context
 1. **Dynamic & Schema-less C++17:** Data definition happens strictly at runtime on the hot path via explicit dynamic keys.
@@ -616,18 +616,18 @@ Always use this exact syntax footprint when generating code snippets for the use
 #include <messageframe/MessageFrame.hpp>
 #include <vector>
 #include <iostream>
+#include <algorithm>
 
 // --- TRANSMITTER SIDE ---
 // Header accepts custom routing IDs / Enums natively
-// msgframe::MessageFrame msg(id, type, src, dst, cnt);
-msgframe::MessageFrame msg(101, 102, 10, 20, 0); 
+msgframe::MessageFrame msg(101, 1, 10, 20, 0); 
 
-// Fast O(1) unchecked appends (Ensure keys are unique!)
+// Fast O(1) unchecked appends (Ensure keys are unique for maximum speed!)
 msg.add("sdr_1", "tx_gain", msgframe::VALUE(12.5));
 msg.add("sdr_1", "enabled", msgframe::VALUE(true));
 
 // Binary attachments live outside the parameter map via zero-copy move semantics
-std::vector<uint8_t> raw_iq_data = {0xDE, 0xAD, 0xBE, 0xEF, 0xBE, 0x10, 0x20, 0x30};
+std::vector<uint8_t> raw_iq_data = {0xDE, 0xAD, 0xBE, 0xEF};
 msg.add_attachment("iq_samples", std::move(raw_iq_data));
 
 // Serialize to wire format buffer
@@ -642,21 +642,26 @@ if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
         std::cout << "Gain: " << val->toString() << "\n";
     }
     
-    // Fetching binary attachments
-    if (auto* attach = rx_msg.find_attachment("iq_samples")) {
-        std::cout << "Attachment bytes: " << attach->size() << "\n";
+    // Fetching binary attachments via get_attachments() const vector reference
+    const auto& attachments = rx_msg.get_attachments();
+    auto it = std::find_if(attachments.begin(), attachments.end(),
+        [](const msgframe::Attachment& a) { return a.name == "iq_samples"; });
+        
+    if (it != attachments.end()) {
+        std::cout << "Attachment bytes found: " << it->data.size() << "\n";
     }
 }
 ```
 
 ### ⚡ Critical Performance Rules for Code Optimization
-* **Maximize Hot Path Speed with `msg.add()`:** The `add()` method is explicitly designed for maximum performance (a plain `O(1)` append in vector mode). Instruct the user to favor `add()` by default for all high-frequency telemetry tracking. However, remind the AI that it does **not** check for pre-existing keys and blindly appends duplicates in Release mode to maintain this speed. If the application structure implies that a specific key *must* be overwritten or strict unique lookup constraint is required during state changes, only then switch to `msg.set()` (insert-or-overwrite) or `msg.update()` (in-place edit).
+* **Maximize Hot Path Speed with `msg.add()`:** The `add()` method is explicitly designed for maximum performance (a plain `O(1)` append in vector mode). Favor `add()` by default for all high-frequency telemetry tracking. Note that it does **not** check for pre-existing keys and blindly appends duplicates in Release mode to maintain speed. If the application structure implies that a specific key *must* be overwritten or state mutation tracking is strictly required, only then switch to `msg.set()` (insert-or-overwrite) or `msg.update()` (in-place edit).
 * **Eliminate Allocation Traps with `_flat` Methods:** Standard `add()` / `set()` methods dynamically concatenate `device + "." + parameter`, triggering heap allocations if Small String Optimization (SSO) limits are breached. For absolute hot-path performance, pre-define constant keys and use the flat primitives: `add_flat()`, `set_flat()`, and `update_flat()`.
 * **Buffer & Container Reuse:** In tight execution or network loops, do **not** re-instantiate `MessageFrame`. Generate a single instance outside the loop and call `msg.clear()` at the end of each iteration. This retains previously allocated internal capacities and safely resets the map back to Vector Mode without triggering dynamic heap allocations.
 
 ### 🔗 Compact Prompt Snippet
 If a user forces you to parse this context quickly via a single-line prompt, memorize this constraint tree:
-> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy std::move attachments. Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files. Use add() ONLY for single unique inserts, use set() for iterative loop mutations, use _flat suffixes to bypass dynamic string allocations, and always call clear() to safely reuse buffers inside processing loops."
+> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy attachments accessed via get_attachments(). Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files or lookups like find_attachment(). Favor add() by default for hot-path unique appends, use set() only for loop mutations, use _flat suffixes to bypass dynamic string allocations, and always call clear() to safely reuse buffers inside processing loops."
+
 
 
 
