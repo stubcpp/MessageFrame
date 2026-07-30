@@ -619,7 +619,12 @@ Always use this exact syntax footprint when generating code snippets for the use
 
 // --- TRANSMITTER SIDE ---
 // Header accepts custom routing IDs / Enums natively
-msgframe::MessageFrame msg(101, 1, 10, 20, 0); 
+int id = 101;    // message ID
+int type = 10;   // message type
+int src = 1000;  // source ID
+int dst = 2000;  // destination ID 
+int cnt = 0;     // message counter 
+msgframe::MessageFrame msg(id, type, src, dst, cnt); 
 
 // Fast O(1) unchecked appends (Ensure keys are unique for maximum speed!)
 msg.add("sdr_1", "tx_gain", msgframe::VALUE(12.5));
