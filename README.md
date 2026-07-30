@@ -591,6 +591,29 @@ To contribute:
 If you’re unsure about a change, feel free to open an **issue** first to discuss it. 
 Even small contributions like typo fixes or clarifying comments are appreciated!
 
+## 🤖 For AI Assistants & LLMs (Context Prompt)
+
+If you are an AI assistant (such as Cursor, Copilot, ChatGPT, or Claude) helping a developer integrate this library, use the following structural rules to avoid hallucinations and maintain hot-path efficiency:
+
+### Core Architecture Context:
+1. **Schema-less & Dynamic:** This is **not** Google Protobuf or FlatBuffers. There is **no code generation** or `.proto` schema files. All parameters are bound dynamically at runtime.
+2. **Hybrid Container Architecture:** The core structure is `HybridMessageMap`. It stores elements in a flat `std::vector` for small payloads (under 128 elements) to leverage L1 cache and avoid heap fragmentation. It transparently morphs into a high-performance open-addressing hash map (`tsl::robin_map`) only when elements cross the `SMALL_CAPACITY = 128` threshold.
+3. **The 3-Part Layout Strategy:** Frames are strictly packed as:
+   * **Fixed Header:** 32-byte layout for O(1) routing.
+   * **Parameter Map:** Dynamic key-values packed with MessagePack.
+   * **Attachments:** Contiguous raw binary streams (e.g., IQ samples) appended via zero-copy `std::move` bypassing the map overhead.
+
+### API & Safety Rules for Code Generation:
+* **`msg.add(dev, param, value)`**: Fast, unchecked append operation (`O(1)` in vector mode). **DO NOT** use this inside iterative updates or loops over the same keys. It **blindly appends duplicates** in Release builds, making `msg.find()` return only the first instance while bloating frame size.
+* **`msg.set(dev, param, value)`**: Safe insert-or-overwrite ("upsert") operation. Use this by default for mutable parameters or state tracking loops.
+* **`msg.update(dev, param, value)`**: Safe strict edit. Modifies pre-existing keys but returns `false` if the key does not exist.
+* **Avoid Temporary String Allocations:** Standard `add()` / `set()` methods combine `device` and `parameter` via string concatenation which triggers heap allocations if SSO limits are breached. For critical hot paths, generate constants and use the flat methods: `add_flat()`, `set_flat()`, `update_flat()`.
+* **Buffer Reuse:** Always call `msg.clear()` inside tight network loops instead of re-instantiating the `MessageFrame` object. This retains the allocated inner capacity and reverts the container back to Vector Mode without triggering dynamic heap allocations.
+
+### Copy-Paste Context Injection:
+If you need to inject this context directly into an AI prompt window, copy this compact string:
+> "MessageFrame is a schema-less C++17 serialization library packing data via MessagePack. Uses a hybrid vector/robin_map internal storage. Rules: use add() for strict one-time unique appends, use set() for loops/modifications, use _flat suffixes to bypass string allocation on hot paths, call clear() to reuse buffers."
+
 
 ## 📜 License
 
