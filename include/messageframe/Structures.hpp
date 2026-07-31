@@ -66,21 +66,38 @@ namespace msgframe {
     struct ParameterKeyHash {
         using is_transparent = void; // Allows hashing string_view on the fly
 
+        // Covers device+"."+param comfortably for realistic key names (README recommends
+        // keeping them short for SSO anyway); pathologically long keys fall back to the heap.
+        static constexpr std::size_t kStackBufSize = 256;
+
         // Hash from the finished key
         std::size_t operator()(const ParameterKey& k) const noexcept {
             return std::hash<std::string>{}(k.full_key);
         }
 
-        // Hash from two string_views (called during find)
+        // Hash from an already-flattened "device.param" string_view (called during find)
         std::size_t operator()(std::string_view flat_key) const noexcept {
             return std::hash<std::string_view>{}(flat_key);
         }
 
-        // Hashes the pair on the fly, simulating a combination key
+        // Hashes (device, param) as if it were the concatenated "device.param" string,
+        // by actually assembling those exact bytes in a stack buffer (no heap allocation
+        // for the common case) and reusing std::hash<string_view> -- keeps this bit-for-bit
+        // consistent with the two overloads above.
         std::size_t operator()(std::pair<std::string_view, std::string_view> p) const noexcept {
-            std::size_t h1 = std::hash<std::string_view>{}(p.first);
-            std::size_t h2 = std::hash<std::string_view>{}(p.second);
-            return h1 ^ (h2 << 1);
+            const std::size_t total = p.first.size() + 1 + p.second.size();
+            if (total <= kStackBufSize) {
+                char buf[kStackBufSize];
+                std::memcpy(buf, p.first.data(), p.first.size());
+                buf[p.first.size()] = '.';
+                std::memcpy(buf + p.first.size() + 1, p.second.data(), p.second.size());
+                return std::hash<std::string_view>{}(std::string_view(buf, total));
+            }
+            // Rare fallback for keys longer than kStackBufSize.
+            std::string tmp;
+            tmp.reserve(total);
+            tmp.append(p.first).append(1, '.').append(p.second);
+            return std::hash<std::string>{}(tmp);
         }
     };
 
