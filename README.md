@@ -545,11 +545,11 @@ Here’s a short example of correct usage of clear() inside a loop:
 
 int main() {
     msgframe::MessageFrame msg(
-        /*id=*/1001,
-        /*type=*/1,
-        /*flags=*/0,
-        /*version=*/1,
-        /*seq=*/1);
+        /*msg_id=*/1001,
+        /*msg_type=*/1,
+        /*src_id=*/50,
+        /*tgt_id=*/99,
+        /*msg_cnt=*/1); // proto_version, msg_flags — optional, default 1 and 0
 
     std::vector<uint8_t> buffer;
 
