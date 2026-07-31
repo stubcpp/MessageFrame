@@ -27,8 +27,8 @@ enum class MyMsgType : int32_t {
 };
 
 // Простий колбек для демонстрації швидкого обходу ітератором
-void printParamCallback(std::string_view flat_key, const msgframe::ParameterValue& val, void* /*user_data*/) {
-    std::cout << "  [Iterate] " << flat_key << " = " << val.toString() << "\n";
+void printParamCallback(std::string_view device, std::string_view param, const msgframe::ParameterValue& val, void* /*user_data*/) {
+    std::cout << "  [Iterate] " << device << "." << param << " = " << val.toString() << "\n";
 }
 
 // ----------------------------------------------------------------
@@ -146,6 +146,8 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     double sum_deserialize{};
 
     for (size_t i = 0; i < cfg.iterations; ++i) {
+        serialization_buffer.clear();
+
         msgframe::MessageFrame bench_msg(200, 7, 1, 2, i);
 
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -198,8 +200,8 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     std::cout << "Throughput:        " << std::fixed << std::setprecision(2) << throughput_mb << " MB/sec\n";
     std::cout << "Success Rate:      " << (successful_deserializations == cfg.iterations ? "100% OK" : "ERROR") << "\n";
     std::cout << "Avg Packed Size:   " << (total_bytes_processed / cfg.iterations) << " bytes\n";
-    std::cout << "sum_add:   " << (sum_add / cfg.iterations) << " us\n";
-    std::cout << "sum_serialize:   " << (sum_serialize / cfg.iterations) << " us\n";
+    std::cout << "sum_add:           " << (sum_add / cfg.iterations) << " us\n";
+    std::cout << "sum_serialize:     " << (sum_serialize / cfg.iterations) << " us\n";
     std::cout << "sum_deserialize:   " << (sum_deserialize / cfg.iterations) << " us\n";
     std::cout << "==================================================\n";
 }

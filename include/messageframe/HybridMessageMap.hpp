@@ -55,12 +55,25 @@ namespace msgframe {
         void add(std::string_view device, std::string_view param, ParameterValue&& val);      // For rvalue (temporary objects / moved variables) — pure move
         template<typename T>
         void add_impl(std::string_view device, std::string_view param, T&& val) {
-            std::string flat_key;
-            flat_key.reserve(device.size() + 1 + param.size());
-            flat_key.append(device).append(".").append(param);
+#ifndef NDEBUG
+            if (find(device, param) != nullptr) {
+                assert(false && "HybridMessageMap::add() called with duplicate key — use set() for upsert semantics");
+            }
+#endif
+            if (is_vector_mode) {
+                if (vector_storage.size() >= SMALL_CAPACITY) {
+                    convert_to_map();
+                } else {
+                    vector_storage.emplace_back(ParameterKey{std::string(device), std::string(param)}, std::forward<T>(val));
+                    return;
+                }
+            }
 
-            // Pass it as const, add_flat will decide when to copy
-            add_flat(flat_key, std::forward<T>(val));
+            if constexpr (std::is_rvalue_reference_v<T&&>) {
+                map_emplace_rvalue(device, param, std::move(val));
+            } else {
+                map_emplace_lvalue(device, param, val);
+            }
         }
 		
         // Adding parameters if the key is already combined ("device.parameter")
@@ -76,8 +89,6 @@ namespace msgframe {
         */
 		void add_flat(std::string_view flat_key, const ParameterValue& val);
         void add_flat(std::string_view flat_key, ParameterValue&& val);
-        template<typename T>
-        void add_flat_impl(std::string_view flat_key, T&& val);
 
         // Upsert: updates the value if the key exists; otherwise adds a new one
         // (slower than add() — linear search in vector mode)
@@ -92,10 +103,21 @@ namespace msgframe {
         void set(std::string_view device, std::string_view param, ParameterValue&& val);
         template<typename T>
         void set_impl(std::string_view device, std::string_view param, T&& val) {
-            std::string flat_key;
-            flat_key.reserve(device.size() + 1 + param.size());
-            flat_key.append(device).append(".").append(param);
-            set_flat(flat_key, std::forward<T>(val));
+            if (is_vector_mode) {
+                auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
+                                       [device, param](const auto& pair) { return pair.first.device == device && pair.first.parameter == param; });
+                if (it != vector_storage.end()) {
+                    it->second = std::forward<T>(val);
+                    return;
+                }
+            } else {
+                auto* found_val = map_find_mutable(device, param);
+                if (found_val != nullptr) {
+                    *found_val = std::forward<T>(val);
+                    return;
+                }
+            }
+            add_impl(device, param, std::forward<T>(val));
         }
 
         // Upsert: updates the value for a combined key ("device.param") if the key exists;
@@ -109,8 +131,6 @@ namespace msgframe {
         */
         void set_flat(std::string_view flat_key, const ParameterValue& val);
         void set_flat(std::string_view flat_key, ParameterValue&& val);
-        template<typename T>
-        void set_flat_impl(std::string_view flat_key, T&& val);
 
         // Strict update: updates only an existing key. Returns false if the key is not found (value remains unchanged)
         /**
@@ -125,10 +145,21 @@ namespace msgframe {
         bool update(std::string_view device, std::string_view param, ParameterValue&& val);
         template<typename T>
         bool update_impl(std::string_view device, std::string_view param, T&& val) {
-            std::string flat_key;
-            flat_key.reserve(device.size() + 1 + param.size());
-            flat_key.append(device).append(".").append(param);
-            return update_flat(flat_key, std::forward<T>(val));
+            if (is_vector_mode) {
+                auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
+                                       [device, param](const auto& pair) { return pair.first.device == device && pair.first.parameter == param; });
+                if (it != vector_storage.end()) {
+                    it->second = std::forward<T>(val);
+                    return true;
+                }
+            } else {
+                auto* found_val = map_find_mutable(device, param);
+                if (found_val != nullptr) {
+                    *found_val = std::forward<T>(val);
+                    return true;
+                }
+            }
+            return false;
         }
 
         // Strict update: updates only an existing key (combined key "device.param").
@@ -143,8 +174,6 @@ namespace msgframe {
         */
         bool update_flat(std::string_view flat_key, const ParameterValue& val);
         bool update_flat(std::string_view flat_key, ParameterValue&& val);
-        template<typename T>
-        bool update_flat_impl(std::string_view flat_key, T&& val);
                 		
 		// Finding parameters without generating temporary std::string
 		const ParameterValue* find(std::string_view device, std::string_view param) const noexcept;
@@ -154,7 +183,7 @@ namespace msgframe {
         size_t size() const noexcept;
 
         // Quickly traverse all container elements
-        using ConstCallback = void(*)(std::string_view flat_key, const ParameterValue& val, void* user_data);
+        using ConstCallback = void(*)(std::string_view device, std::string_view param, const ParameterValue& val, void* user_data);
         void iterate(ConstCallback callback, void* user_data) const;
 
         // Internal pImpl methods for MessagePack
@@ -163,9 +192,12 @@ namespace msgframe {
 
     private:
         void convert_to_map();
+        void map_emplace_rvalue(std::string_view device, std::string_view param, ParameterValue&& val);
+        void map_emplace_lvalue(std::string_view device, std::string_view param, const ParameterValue& val);
+        ParameterValue* map_find_mutable(std::string_view device, std::string_view param) noexcept;
 
-        bool is_flat_map{true};
-        std::vector<std::pair<FlatKey, ParameterValue>> vector_storage; // CPU L1-cache line
+        bool is_vector_mode{true};
+        std::vector<std::pair<ParameterKey, ParameterValue>> vector_storage; // CPU L1-cache line
 		
 		struct MapImpl;
         std::unique_ptr<MapImpl> map_storage; // Hidden tsl::robin_map

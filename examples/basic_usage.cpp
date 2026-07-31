@@ -42,8 +42,8 @@ enum class MyMsgType : int32_t {
 
 // Callback for iterate_parameters() — invoked for each parameter
 // in the message, without creating temporary std::string for the key.
-void printParam(std::string_view flat_key, const msgframe::ParameterValue& val, void* /*user_data*/) {
-    std::cout << "  [Iterate] " << flat_key << " = " << val.toString() << "\n";
+void printParam(std::string_view device, std::string_view param, const msgframe::ParameterValue& val, void* /*user_data*/) {
+    std::cout << "  [Iterate] " << device << "." << param << " = " << val.toString() << "\n";
 }
 
 int main() {
