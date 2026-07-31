@@ -52,9 +52,12 @@ namespace msgframe {
         bool operator()(const ParameterKey& lhs, std::pair<std::string_view, std::string_view> rhs) const noexcept {
             std::string_view l_view(lhs.full_key);
             if (l_view.size() != rhs.first.size() + 1 + rhs.second.size()) return false;
-            if (l_view.compare(0, rhs.first.size(), rhs.first) != 0) return false;
-            if (l_view[rhs.first.size()] != '.') return false;
-            return l_view.substr(rhs.first.size() + 1) == rhs.second;
+
+            // Direct step-by-step comparison without unnecessary creation of substring objects
+            return l_view.compare(0) &&
+                l_view[rhs.first.size()] == '.' &&
+                l_view.compare(rhs.first.size() + 1, rhs.second.size(), rhs.second) == 0;
+
         }
 
         bool operator()(const ParameterKey& lhs, std::string_view rhs_flat) const noexcept {
@@ -113,19 +116,23 @@ namespace msgframe {
     public:
         VectorBuffer(std::vector<uint8_t>& buffer) : m_buf(buffer) {
             m_buf.clear();
+            if (m_buf.capacity() < 1024) {
+                m_buf.reserve(1024);
+            }
         }
+
         void write(const char* buf, size_t len) {
-            size_t old_size = m_buf.size();
-            m_buf.resize(old_size + len);
-            std::memcpy(m_buf.data() + old_size, buf, len);
-        }
+            const auto* u_buf = reinterpret_cast<const uint8_t*>(buf);
+            m_buf.insert(m_buf.end(), u_buf, u_buf + len);
+        } 
+
     private:
         std::vector<uint8_t>& m_buf;
     };
 
     // is_transparent — a tag that tells tsl::robin_map: "this functor can
     // accept multiple compatible key types, not just Key". A custom hash is needed,
-    // because std::hash<std::string> does not accept std::string_view (no conversion,
+    // because std::hash<std::strng> does not accept std::string_view (no conversion,
     // this is an intentional limitation of the standard — without it, every hash() could silently
     // allocate a std::string). std::equal_to<> is already transparent out of the box (it has
     // is_transparent and a template operator()).
