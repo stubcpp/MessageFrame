@@ -136,6 +136,15 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     double sum_add{};
     double sum_serialize{};
     double sum_deserialize{};
+    double sum_find{};
+
+    // STEP 4 setup: benchmark find() against the LAST-inserted param on
+    // purpose. In vector mode find() is a linear std::find_if scan from the
+    // front, so the last-inserted key is the worst case; in map mode
+    // position doesn't matter (O(1) either way). This keeps the number
+    // honest for both modes instead of flattering vector mode with an
+    // early/near-front lookup.
+    std::string_view last_param_name = key_pool[cfg.params_count - 1];
 
     for (size_t i = 0; i < cfg.iterations; ++i) {
         serialization_buffer.clear();
@@ -161,6 +170,13 @@ void runBenchmark(const BenchmarkConfig& cfg) {
                 << bench_msg.parameters_size() << "\n\n";
         }
 
+        // STEP 4: Zero-allocation lookup, worst-case position (see setup above).
+        // volatile prevents the optimizer from hoisting/eliding the call since
+        // the result would otherwise look unused from the compiler's point of view.
+        volatile const void* found_ptr = bench_msg.find("dev", last_param_name);
+        (void)found_ptr;
+        auto t1_5 = std::chrono::high_resolution_clock::now();
+        
         bench_msg.serialize(serialization_buffer);
         auto t2 = std::chrono::high_resolution_clock::now();
         total_bytes_processed += serialization_buffer.size();
@@ -172,6 +188,7 @@ void runBenchmark(const BenchmarkConfig& cfg) {
         auto t3 = std::chrono::high_resolution_clock::now();
 
         sum_add += std::chrono::duration<double, std::micro>(t1 - t0).count();
+        sum_find += std::chrono::duration<double, std::micro>(t1_5 - t1).count();
         sum_serialize += std::chrono::duration<double, std::micro>(t2 - t1).count();
         sum_deserialize += std::chrono::duration<double, std::micro>(t3 - t2).count();
     }
@@ -193,6 +210,7 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     std::cout << "Success Rate:      " << (successful_deserializations == cfg.iterations ? "100% OK" : "ERROR") << "\n";
     std::cout << "Avg Packed Size:   " << (total_bytes_processed / cfg.iterations) << " bytes\n";
     std::cout << "sum_add:           " << (sum_add / cfg.iterations) << " us\n";
+    std::cout << "sum_find:          " << (sum_find / cfg.iterations) << " us  (worst-case: last-inserted key)\n";
     std::cout << "sum_serialize:     " << (sum_serialize / cfg.iterations) << " us\n";
     std::cout << "sum_deserialize:   " << (sum_deserialize / cfg.iterations) << " us\n";
     std::cout << "==================================================\n";
