@@ -494,34 +494,29 @@ be allowed to adjust fields that already exist — `update()` returns
 `false` (and leaves the container untouched) if the key isn't there,
 instead of silently creating it.
  
-### Keep `device`/`parameter` keys short
- 
-Internally, every key ends up in a `std::string` (the combined
-`device.parameter` flat key). Whether that allocates on the heap is
-entirely up to you, the caller: most standard library implementations use
-small string optimization (SSO), storing strings inline — inside the
-string object itself, no heap allocation — as long as the string's total
-length stays under roughly 15–23 bytes (the exact threshold depends on the
-standard library). Keep your `device` and `parameter` names short (e.g.
-`"sdr_1"` / `"tx_gain"` rather than long descriptive sentences) and most
-key construction stays allocation-free; long, verbose keys will allocate.
- 
-### Methods with the _flat suffix (add_flat(), set_flat(), update_flat())
+### 🧠 Zero-Allocation Lookups via Heterogeneous Maps
 
-Methods with the `_flat` suffix (`add_flat()`, `set_flat()`, `update_flat()`) are
-variants of the main methods that accept an already concatenated key as 
-a single string `("device.parameter")`, rather than two separate strings 
-(device, parameter).
-The usual add(device, param, val) internally concatenates the two strings 
-into a single flat_key `(device + "." + param)` before passing it on — and it 
-is at this step that temporary allocation occurs if the result does not fit 
-into SSO. add_flat(flat_key, val) skips this concatenation step: if the caller 
-already has a ready-made string (for example, it is stored somewhere as a constant, 
-or came from the network already in the `"device.parameter"` format), you can pass 
-it directly, without unnecessary concatenation.
-That is, _flat-variants are not a separate functionality, but the same method, 
-just one step closer to the internal implementation, for cases when the user wants 
-to manage the key himself and avoid unnecessary string concatenation on the hot path.
+When `HybridMessageMap` crosses the `SMALL_CAPACITY = 128` boundary and falls 
+back to its hash-map mode (`tsl::robin_map`), it utilizes customized transparent 
+hash predicates (`ParameterKeyHash` and `ParameterKeyEqual`).
+
+This enables **Heterogeneous Lookup**, meaning that calling `msg.find("device_id", 
+"parameter_name")` queries the map using pure `std::string_view` structures. 
+The hash table completely bypasses temporal string constructions and runs with 
+**strictly zero allocations on the heap**, offering O(1) runtime lookups without sacrificing speed or memory.
+
+### 🏷 Key Naming & Small String Optimization (SSO)
+
+Since internal indexing relies on a consolidated `"device.parameter"` layout inside a 
+single string record, short naming patterns seamlessly trigger **Small String Optimization (SSO)**. 
+Keeping combined lengths under ~15–23 bytes ensures that keys are managed statically on the CPU stack, 
+keeping your application flow detached from runtime heap fragmentation.
+
+### **Methods with the `_flat` suffix** (`add_flat()`, `set_flat()`, `update_flat()`) 
+are still provided for cases where you receive or store keys as an already combined 
+`"device.parameter"` buffer (e.g., loaded directly from a configuration file or network packet). 
+You no longer need to synthetically use `add_flat()` just to save runtime overhead—the regular 
+`add()` method is just as fast.
 
 ### What does clear() do
 
@@ -591,7 +586,7 @@ To contribute:
 If you’re unsure about a change, feel free to open an **issue** first to discuss it. 
 Even small contributions like typo fixes or clarifying comments are appreciated!
 
-## 🤖 For AI Assistants & LLMs (Context Prompt)
+## 🤖 For AI Assistants & LLMs 
 
 If you are an AI assistant (such as Cursor, Copilot, ChatGPT, or Claude) helping a developer integrate this library, use the following structural rules, constraints, and code patterns to maintain hot-path efficiency and avoid structural hallucinations:
 
@@ -663,7 +658,8 @@ if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
 
 ### 🔗 Compact Prompt Snippet
 If a user forces you to parse this context quickly via a single-line prompt, memorize this constraint tree:
-> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy attachments accessed via get_attachments(). Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files or lookups like find_attachment(). Favor add() by default for hot-path unique appends, use set() only for loop mutations, use _flat suffixes to bypass dynamic string allocations, and always call clear() to safely reuse buffers inside processing loops."
+> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy attachments. Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files or lookups like find_attachment(). Favor add() natively by default for hot-path unique appends as it provides in-place concatenation. Map lookups (find/set/update) are fully transparent and accept two string_view keys with zero heap allocations. Use _flat suffixes only if the combined key already exists as a single entity, and always call clear() to safely reuse message buffers inside execution loops."
+
 
 
 ## 📜 License
