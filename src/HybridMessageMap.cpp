@@ -13,88 +13,35 @@ namespace msgframe {
     // MapImpl (Implementation of pImpl for tsl::robin_map)
     // Uses a flat string as the only key, storing ParameterValue
     struct HybridMessageMap::MapImpl {
-        tsl::robin_map<std::string, ParameterValue, StringViewHash, std::equal_to<>> map;
+        tsl::robin_map<ParameterKey, ParameterValue, ParameterKeyHash, ParameterKeyEqual> map;
     };
 
-    template<typename T>
-    void HybridMessageMap::add_flat_impl(std::string_view flat_key, T&& val) {
-#ifndef NDEBUG
-        if (find_flat(flat_key) != nullptr) {
-            assert(false && "HybridMessageMap::add() called with duplicate key — use set() for upsert semantics");
-        }
-#endif
-
-        if (is_flat_map) {
-            if (vector_storage.size() >= SMALL_CAPACITY) {
-                convert_to_map();
-                // Code continues below and adds the element into the map
-            }
-            else {
-                // std::forward preserves the type: performs move for rvalue and copy for lvalue!
-                vector_storage.push_back({ FlatKey{ std::string(flat_key) }, std::forward<T>(val) });
-                return;
-            }
-        }
-
-        // Fast insertion into the map
-        map_storage->map.emplace(std::string(flat_key), std::forward<T>(val));
+    void HybridMessageMap::map_emplace_rvalue(std::string_view device, std::string_view param, ParameterValue&& val) {
+        map_storage->map.emplace(ParameterKey{device, param}, std::move(val));
     }
 
-    template<typename T>
-    void HybridMessageMap::set_flat_impl(std::string_view flat_key, T&& val) {
-        if (is_flat_map) {
-            auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
-
-            if (it != vector_storage.end()) {
-                it->second = std::forward<T>(val); // Upsert-updating in the vector
-                return;
-            }
-
-            if (vector_storage.size() >= SMALL_CAPACITY) {
-                convert_to_map();
-            }
-            else {
-                vector_storage.push_back({ FlatKey{ std::string(flat_key) }, std::forward<T>(val) });
-                return;
-            }
-        }
-
-        // Insert or replace in a map. insert_or_assign is ideal for modifying keys
-        map_storage->map.insert_or_assign(std::string(flat_key), std::forward<T>(val));
+    void HybridMessageMap::map_emplace_lvalue(std::string_view device, std::string_view param, const ParameterValue& val) {
+        map_storage->map.emplace(ParameterKey{device, param}, val);
     }
 
-    template<typename T>
-    bool HybridMessageMap::update_flat_impl(std::string_view flat_key, T&& val) {
-        if (is_flat_map) {
-            auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
-
-            if (it == vector_storage.end()) return false;
-            it->second = std::forward<T>(val);
-            return true;
+    ParameterValue* HybridMessageMap::map_find_mutable(std::string_view device, std::string_view param) noexcept {
+        auto it = map_storage->map.find(std::make_pair(device, param));
+        if (it != map_storage->map.end()) {
+            return const_cast<ParameterValue*>(&(it->second));
         }
-        else {
-            auto it = map_storage->map.find(flat_key);
-            if (it == map_storage->map.end()) return false;
-
-            // To bypass iterator constancy and force the map to perform a legal low-latency replacement:
-            map_storage->map.insert_or_assign(it->first, std::forward<T>(val));
-            return true;
-        }
+        return nullptr;
     }
 
-    // Explicit instantiation of templates for the two types with which these templates are actually called
-    template void HybridMessageMap::add_flat_impl<const ParameterValue&>(std::string_view, const ParameterValue&);
-    template void HybridMessageMap::add_flat_impl<ParameterValue>(std::string_view, ParameterValue&&);
-    template void HybridMessageMap::set_flat_impl<const ParameterValue&>(std::string_view, const ParameterValue&);
-    template void HybridMessageMap::set_flat_impl<ParameterValue>(std::string_view, ParameterValue&&);
-    template bool HybridMessageMap::update_flat_impl<const ParameterValue&>(std::string_view, const ParameterValue&);
-    template bool HybridMessageMap::update_flat_impl<ParameterValue>(std::string_view, ParameterValue&&);
-
+    // Instantiation for basic methods (with two key components device + param)
+    template void msgframe::HybridMessageMap::add_impl<const msgframe::ParameterValue&>(std::string_view, std::string_view, const msgframe::ParameterValue&);
+    template void msgframe::HybridMessageMap::add_impl<msgframe::ParameterValue>(std::string_view, std::string_view, msgframe::ParameterValue&&);
+    template void msgframe::HybridMessageMap::set_impl<const msgframe::ParameterValue&>(std::string_view, std::string_view, const msgframe::ParameterValue&);
+    template void msgframe::HybridMessageMap::set_impl<msgframe::ParameterValue>(std::string_view, std::string_view, msgframe::ParameterValue&&);
+    template bool msgframe::HybridMessageMap::update_impl<const msgframe::ParameterValue&>(std::string_view, std::string_view, const msgframe::ParameterValue&);
+    template bool msgframe::HybridMessageMap::update_impl<msgframe::ParameterValue>(std::string_view, std::string_view, msgframe::ParameterValue&&);
 
     HybridMessageMap::HybridMessageMap() : 
-        is_flat_map(true), 
+        is_vector_mode(true),
         map_storage(nullptr) {
 
         // Optimize the vector for the CPU L1 cache line 
@@ -105,13 +52,13 @@ namespace msgframe {
 
     // Moving objects
     HybridMessageMap::HybridMessageMap(HybridMessageMap&& other) noexcept 
-        : is_flat_map(other.is_flat_map),
+        : is_vector_mode(other.is_vector_mode),
           vector_storage(std::move(other.vector_storage)),
           map_storage(std::move(other.map_storage)) {}
 
     HybridMessageMap& HybridMessageMap::operator=(HybridMessageMap&& other) noexcept {
         if (this != &other) {
-            is_flat_map = other.is_flat_map;
+            is_vector_mode = other.is_vector_mode;
             vector_storage = std::move(other.vector_storage);
             map_storage = std::move(other.map_storage);
         }
@@ -130,11 +77,21 @@ namespace msgframe {
     }
 
     void HybridMessageMap::add_flat(std::string_view flat_key, const ParameterValue& val) {
-        add_flat_impl(flat_key, val); // Passed as const&
+        size_t dot_pos = flat_key.find('.');
+        if (dot_pos == std::string_view::npos) {
+            add_impl("", flat_key, val);
+        } else {
+            add_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), val);
+        }
     }
 
     void HybridMessageMap::add_flat(std::string_view flat_key, ParameterValue&& val) {
-        add_flat_impl(flat_key, std::move(val)); // Passed as &&
+        size_t dot_pos = flat_key.find('.');
+        if (dot_pos == std::string_view::npos) {
+            add_impl("", flat_key, std::move(val));
+        } else {
+            add_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), std::move(val));
+        }
     }
 
     void HybridMessageMap::set(std::string_view device, std::string_view param, const ParameterValue& val) {
@@ -146,11 +103,21 @@ namespace msgframe {
     }
 
     void HybridMessageMap::set_flat(std::string_view flat_key, const ParameterValue& val) {
-        set_flat_impl(flat_key, val);
+        size_t dot_pos = flat_key.find('.');
+        if (dot_pos == std::string_view::npos) {
+            set_impl("", flat_key, val);
+        } else {
+            set_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), val);
+        }
     }
     
     void HybridMessageMap::set_flat(std::string_view flat_key, ParameterValue&& val) {
-        set_flat_impl(flat_key, std::move(val));
+        size_t dot_pos = flat_key.find('.');
+        if (dot_pos == std::string_view::npos) {
+            set_impl("", flat_key, std::move(val));
+        } else {
+            set_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), std::move(val));
+        }
     }
 
     bool HybridMessageMap::update(std::string_view device, std::string_view param, const ParameterValue& val) {
@@ -162,46 +129,49 @@ namespace msgframe {
     }
 
     bool HybridMessageMap::update_flat(std::string_view flat_key, const ParameterValue& val) {
-        return update_flat_impl(flat_key, val);
+        size_t dot_pos = flat_key.find('.');
+        if (dot_pos == std::string_view::npos) {
+            return update_impl("", flat_key, val);
+        } else {
+            return update_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), val);
+        }
     }
 
     bool HybridMessageMap::update_flat(std::string_view flat_key, ParameterValue&& val) {
-        return update_flat_impl(flat_key, std::move(val));
+        size_t dot_pos = flat_key.find('.');
+        if (dot_pos == std::string_view::npos) {
+            return update_impl("", flat_key, std::move(val));
+        } else {
+            return update_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), std::move(val));
+        }
     }
     
     const ParameterValue* HybridMessageMap::find(std::string_view device, std::string_view param) const noexcept {
-        if (is_flat_map) {
+        if (is_vector_mode) {
             // Searching the vector without creating any temporary strings.
-            for (const auto& pair : vector_storage) {
-                const std::string& key = pair.first.full_key;
-                // Quick check: length and delimiter
-                if (key.size() == device.size() + 1 + param.size() &&
-                    key.compare(0, device.size(), device) == 0 &&
-                    key[device.size()] == '.' &&
-                    key.compare(device.size() + 1, param.size(), param) == 0) {
-                        return &pair.second;
-                }
-            }
-            return nullptr;
+            auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
+                                   [device, param](const std::pair<ParameterKey, ParameterValue>& pair) {
+                                       std::string_view l_view(pair.first.full_key);
+                                       if (l_view.size() != device.size() + 1 + param.size()) return false;
+                                       if (l_view.compare(0, device.size(), device) != 0) return false;
+                                       if (l_view[device.size()] != '.') return false;
+                                       return l_view.substr(device.size() + 1) == param;
+                                   });
+            return (it != vector_storage.end()) ? &(it->second) : nullptr;
         } else {
-            // If we are already in the map, we’ll need to build a temporary key.
-            // But thanks to tsl::robin_map and Small String Optimization (SSO),
-            // short device names won’t touch the heap.
-            std::string flat_key;
-            flat_key.append(device).append(".").append(param);
-            return find_flat(flat_key);
+            // Thanks to transparent comparators, we search by string_view pair!
+            // No std::string is created or copied here.
+            auto it = map_storage->map.find(std::make_pair(device, param));
+            return (it != map_storage->map.end()) ? &(it->second) : nullptr;
         }
     }  
 
     const ParameterValue* HybridMessageMap::find_flat(std::string_view flat_key) const noexcept {
-        if (is_flat_map) {
+        if (is_vector_mode) {
             auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
-
+                                   [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
             return (it != vector_storage.end()) ? &(it->second) : nullptr;
         } else {
-            if (!map_storage) return nullptr;
-            // tsl::robin_map supports heterogeneous lookup via std::string_view
             auto it = map_storage->map.find(flat_key);
             return (it != map_storage->map.end()) ? &(it->second) : nullptr;
         }
@@ -212,38 +182,46 @@ namespace msgframe {
         if (map_storage) {
             map_storage->map.clear();
         }
-        is_flat_map = true;
+        is_vector_mode = true;
     }
 
     size_t HybridMessageMap::size() const noexcept {
-        return is_flat_map ? vector_storage.size() : map_storage->map.size();
+        return is_vector_mode ? vector_storage.size() : map_storage->map.size();
     }
 
     void HybridMessageMap::convert_to_map() {
-        map_storage = std::make_unique<MapImpl>();
+        is_vector_mode = false;
         
+        if (!map_storage) {
+            map_storage = std::make_unique<MapImpl>();
+        }
+
 		// Allocate buckets for future size, avoiding rehashing
-		map_storage->map.reserve(vector_storage.size() * 2);
+        map_storage->map.reserve(SMALL_CAPACITY);
 		
 		// Move data from vector to map without copying values
 		for (auto& pair : vector_storage) {
-            map_storage->map.emplace(std::move(pair.first.full_key), std::move(pair.second));
+            // std::move(pair.first) takes memory allocated for strings inside ParameterKey without reallocations
+            map_storage->map.emplace(std::move(pair.first), std::move(pair.second));
+
 		}
 
         vector_storage.clear();
-        is_flat_map = false;
+        vector_storage.shrink_to_fit();
     }
 
     void HybridMessageMap::iterate(ConstCallback callback, void* user_data) const {
         if (!callback) return;
 
-        if (is_flat_map) {
+        if (is_vector_mode) {
+            // Flat vector traversal (perfect L1/L2 cache locality)
             for (const auto& pair : vector_storage) {
                 callback(pair.first.full_key, pair.second, user_data);
             }
         } else if (map_storage) {
+            // Traversal robin_map, passing individual string components of the key
             for (const auto& pair : map_storage->map) {
-                callback(pair.first, pair.second, user_data);
+                callback(pair.first.full_key, pair.second, user_data);
             }
         }
     }
@@ -255,14 +233,14 @@ namespace msgframe {
 
         pk->pack_map(size());
 
-        if (is_flat_map) {
+        if (is_vector_mode) {
             for (const auto& pair : vector_storage) {
-                pk->pack(pair.first.full_key);
-                pair.second.pack(pk); 
+                pk->pack(pair.first.full_key); // Instant whole string packing
+                pair.second.pack(pk);
             }
         } else if (map_storage) {
             for (const auto& pair : map_storage->map) {
-                pk->pack(pair.first);
+                pk->pack(pair.first.full_key);
                 pair.second.pack(pk);
             }
         }
@@ -279,23 +257,22 @@ namespace msgframe {
         
         // If there are many elements at once, migrate to the map immediately
         if (map_size > SMALL_CAPACITY) {
-            map_storage = std::make_unique<MapImpl>();
+            if (!map_storage) map_storage = std::make_unique<MapImpl>();
             map_storage->map.reserve(map_size);
-            is_flat_map = false;
+            is_vector_mode = false;
         }
 
         const auto* ptr = obj.via.map.ptr;
         for (size_t i = 0; i < map_size; ++i) {
             std::string key = (ptr + i)->key.as<std::string>();
-            
+
             ParameterValue val;
             val.unpack(&(ptr + i)->val);
 
-            if (is_flat_map) {
-                vector_storage.push_back({ FlatKey{ std::move(key) }, std::move(val) });
+            if (is_vector_mode) {
+                vector_storage.emplace_back(ParameterKey{std::move(key)}, std::move(val));
             } else {
-                // map_storage->map[std::move(key)] = std::move(val);
-                map_storage->map.emplace(std::move(key), std::move(val));
+                map_storage->map.emplace(ParameterKey{std::move(key)}, std::move(val));
             }
         }
     }
