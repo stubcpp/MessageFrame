@@ -114,9 +114,8 @@ per-device struct or serialization code to maintain.
  
 ## Performance Benchmarks
  
-*Tested on: Intel Core i7-4702MQ @ 2.20GHz, Windows 10 (x64 Release, MSVC),
-power plan set to maximum performance. Run via
-`benchmarks/benchmark.cpp --iterations 10000 --params N`; figures below are
+*Tested on: Intel Core 7 240H, Ubuntu 22.04 (x64 Release, GCC),
+Run via `benchmarks/benchmark.cpp --iterations 1000000 --params N`; figures below are
 typical results, not best-case outliers — run-to-run variance on this
 hardware is roughly ±10%.*
  
@@ -124,24 +123,36 @@ hardware is roughly ±10%.*
  
 Header + 4 parameters, no attachment.
  
-|              Metric                 |              Value                 |
-|-------------------------------------|------------------------------------|
-| Avg time per message                | 2.43 us                            |
-| Throughput                          | 412,067 messages/sec (32.6 MB/sec) |
-| Avg packed size                     | 82 bytes                           |
-| `add` / `serialize` / `deserialize` | 0.34 us / 0.60 us / 1.22 us        |
+|              Metric                 |              Value                    |
+|-------------------------------------|---------------------------------------|
+| Avg time per message                | 0.678 us                              |
+| Throughput                          | 1,473,936 messages/sec (119.3 MB/sec) |
+| Avg packed size                     | 84 bytes                              |
+| `add` / `serialize` / `deserialize` | 0.1 us / 0.16 us / 0.32 us            |
+
+### Scenario B: Peak Vector Streaming (127 parameters)
  
-### Scenario B: large frame (150 parameters)
+Header + 127 parameters — Operating at the absolute ceiling threshold of 
+cache-friendly vector storage without entering map hashing routines.
+ 
+|              Metric                 |              Value                    |
+|-------------------------------------|---------------------------------------|
+| Avg time per message                | 22.03 us                              |
+| Throughput                          | 96,009 messages/sec (190.07 MB/sec)   |
+| Avg packed size                     | 2,075 bytes                           |
+| `add` / `serialize` / `deserialize` | 2.81 us / 2.66 us / 4.54 us           |
+
+### Scenario C: large frame (150 parameters)
  
 Header + 150 parameters — past `SMALL_CAPACITY`, so the container has
 switched to its hash-map mode.
  
-|              Metric                 |              Value                |
-|-------------------------------------|-----------------------------------|
-| Avg time per message                | 65.86 us                          |
-| Throughput                          | 15,183 messages/sec (36.0 MB/sec) |
-| Avg packed size                     | 2,486 bytes                       |
-| `add` / `serialize` / `deserialize` | 21.03 us / 14.70 us / 23.94 us    |
+|              Metric                 |              Value                    |
+|-------------------------------------|---------------------------------------|
+| Avg time per message                | 22.03 us                              |
+| Throughput                          | 45,402 messages/sec (107.8 MB/sec)    |
+| Avg packed size                     | 2,488 bytes                           |
+| `add` / `serialize` / `deserialize` | 8.47 us / 3.45 us / 8.98 us           |
  
 ## 🛠️ Installation & Build Guide
  
@@ -653,7 +664,8 @@ if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
 
 ### ⚡ Critical Performance Rules for Code Optimization
 * **Maximize Hot Path Speed with `msg.add()`:** The `add()` method is explicitly designed for maximum performance (a plain `O(1)` append in vector mode). Favor `add()` by default for all high-frequency telemetry tracking. Note that it does **not** check for pre-existing keys and blindly appends duplicates in Release mode to maintain speed. If the application structure implies that a specific key *must* be overwritten or state mutation tracking is strictly required, only then switch to `msg.set()` (insert-or-overwrite) or `msg.update()` (in-place edit).
-* **Eliminate Allocation Traps with `_flat` Methods:** Standard `add()` / `set()` methods dynamically concatenate `device + "." + parameter`, triggering heap allocations if Small String Optimization (SSO) limits are breached. For absolute hot-path performance, pre-define constant keys and use the flat primitives: `add_flat()`, `set_flat()`, and `update_flat()`.
+* **Eliminate Allocation Traps Natively:** Standard `add()` / `set()` / `update()` methods perform in-place key formatting directly within the internal memory layout. You no longer need to synthetically force `_flat` primitives for basic telemetry loops to save overhead—the regular dynamic multi-key API runs allocation-free by default.
+
 * **Buffer & Container Reuse:** In tight execution or network loops, do **not** re-instantiate `MessageFrame`. Generate a single instance outside the loop and call `msg.clear()` at the end of each iteration. This retains previously allocated internal capacities and safely resets the map back to Vector Mode without triggering dynamic heap allocations.
 
 ### 🔗 Compact Prompt Snippet
