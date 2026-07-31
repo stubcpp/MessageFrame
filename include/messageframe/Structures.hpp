@@ -87,7 +87,7 @@ namespace msgframe {
         std::size_t operator()(std::pair<std::string_view, std::string_view> p) const noexcept {
             const std::size_t total = p.first.size() + 1 + p.second.size();
             if (total <= kStackBufSize) {
-                char buf[kStackBufSize];
+                char buf[kStackBufSize]{ 0 };
                 std::memcpy(buf, p.first.data(), p.first.size());
                 buf[p.first.size()] = '.';
                 std::memcpy(buf + p.first.size() + 1, p.second.data(), p.second.size());
