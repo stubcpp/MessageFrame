@@ -64,7 +64,8 @@ namespace msgframe {
                 if (vector_storage.size() >= SMALL_CAPACITY) {
                     convert_to_map();
                 } else {
-                    vector_storage.emplace_back(ParameterKey{std::string(device), std::string(param)}, std::forward<T>(val));
+                    // Stitching is done strictly in-place inside the ParameterKey constructor.
+                    vector_storage.emplace_back(ParameterKey{device, param}, std::forward<T>(val));
                     return;
                 }
             }
@@ -105,7 +106,14 @@ namespace msgframe {
         void set_impl(std::string_view device, std::string_view param, T&& val) {
             if (is_vector_mode) {
                 auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                                       [device, param](const auto& pair) { return pair.first.device == device && pair.first.parameter == param; });
+                                       [device, param](const auto& pair) {
+                                           //Using the same fast logical comparison algorithm without gluing strings on the stack
+                                           std::string_view l_view(pair.first.full_key);
+                                           if (l_view.size() != device.size() + 1 + param.size()) return false;
+                                           if (l_view.compare(0, device.size(), device) != 0) return false;
+                                           if (l_view[device.size()] != '.') return false;
+                                           return l_view.substr(device.size() + 1) == param;
+                                       });
                 if (it != vector_storage.end()) {
                     it->second = std::forward<T>(val);
                     return;
@@ -147,7 +155,13 @@ namespace msgframe {
         bool update_impl(std::string_view device, std::string_view param, T&& val) {
             if (is_vector_mode) {
                 auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                                       [device, param](const auto& pair) { return pair.first.device == device && pair.first.parameter == param; });
+                                       [device, param](const auto& pair) {
+                                           std::string_view l_view(pair.first.full_key);
+                                           if (l_view.size() != device.size() + 1 + param.size()) return false;
+                                           if (l_view.compare(0, device.size(), device) != 0) return false;
+                                           if (l_view[device.size()] != '.') return false;
+                                           return l_view.substr(device.size() + 1) == param;
+                                       });
                 if (it != vector_storage.end()) {
                     it->second = std::forward<T>(val);
                     return true;
@@ -183,7 +197,7 @@ namespace msgframe {
         size_t size() const noexcept;
 
         // Quickly traverse all container elements
-        using ConstCallback = void(*)(std::string_view device, std::string_view param, const ParameterValue& val, void* user_data);
+        using ConstCallback = void(*)(std::string_view flat_key, const ParameterValue& val, void* user_data);
         void iterate(ConstCallback callback, void* user_data) const;
 
         // Internal pImpl methods for MessagePack

@@ -260,7 +260,7 @@ struct IterateCounter {
     double sum = 0.0;
 };
 
-void count_and_sum(std::string_view /*device*/, std::string_view /*param*/, const ParameterValue& val, void* user_data) {
+void count_and_sum(std::string_view /*device*/, const ParameterValue& val, void* user_data) {
     auto* counter = static_cast<IterateCounter*>(user_data);
     counter->count++;
     if (auto d = val.tryGetDouble()) {

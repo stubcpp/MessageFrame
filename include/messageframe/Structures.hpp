@@ -24,12 +24,19 @@ namespace msgframe {
 	
     // Optimized key-container. Protects against allocations for string concatenation
     struct ParameterKey {
-        std::string device;
-        std::string parameter;
+        std::string full_key; // Stored as "device.parameter"
 
-        // Equal operator for std::find_if та tsl::robin_map
+        // Optimized constructor that stitches the key in one pass
+        ParameterKey(std::string_view device, std::string_view param) {
+            full_key.reserve(device.size() + 1 + param.size());
+            full_key.append(device).append(".").append(param);
+        }
+
+        // Direct transfer or copy constructor for flat methods
+        explicit ParameterKey(std::string key) : full_key(std::move(key)) {}
+
         bool operator==(const ParameterKey& other) const noexcept {
-            return device == other.device && parameter == other.parameter;
+            return full_key == other.full_key;
         }
     };
 
@@ -38,13 +45,20 @@ namespace msgframe {
 
         // Key to Key comparison (for internal map needs)
         bool operator()(const ParameterKey& lhs, const ParameterKey& rhs) const noexcept {
-            return lhs.device == rhs.device && lhs.parameter == rhs.parameter;
+            return lhs.full_key == rhs.full_key;
         }
 
-        // Compare Key with two std::string_view (for fast find)
-        // This will allow you to search the map without creating temporary std::strings!
+        // Comparing the internal full_key with the pair (device, param)
         bool operator()(const ParameterKey& lhs, std::pair<std::string_view, std::string_view> rhs) const noexcept {
-            return lhs.device == rhs.first && lhs.parameter == rhs.second;
+            std::string_view l_view(lhs.full_key);
+            if (l_view.size() != rhs.first.size() + 1 + rhs.second.size()) return false;
+            if (l_view.compare(0, rhs.first.size(), rhs.first) != 0) return false;
+            if (l_view[rhs.first.size()] != '.') return false;
+            return l_view.substr(rhs.first.size() + 1) == rhs.second;
+        }
+
+        bool operator()(const ParameterKey& lhs, std::string_view rhs_flat) const noexcept {
+            return lhs.full_key == rhs_flat;
         }
     };
 
@@ -54,19 +68,18 @@ namespace msgframe {
 
         // Hash from the finished key
         std::size_t operator()(const ParameterKey& k) const noexcept {
-            return hash_combine(k.device, k.parameter);
+            return std::hash<std::string>{}(k.full_key);
         }
 
         // Hash from two string_views (called during find)
-        std::size_t operator()(std::pair<std::string_view, std::string_view> p) const noexcept {
-            return hash_combine(p.first, p.second);
+        std::size_t operator()(std::string_view flat_key) const noexcept {
+            return std::hash<std::string_view>{}(flat_key);
         }
 
-    private:
-        // Helper fast hasher
-        std::size_t hash_combine(std::string_view s1, std::string_view s2) const noexcept {
-            std::size_t h1 = std::hash<std::string_view>{}(s1);
-            std::size_t h2 = std::hash<std::string_view>{}(s2);
+        // Hashes the pair on the fly, simulating a combination key
+        std::size_t operator()(std::pair<std::string_view, std::string_view> p) const noexcept {
+            std::size_t h1 = std::hash<std::string_view>{}(p.first);
+            std::size_t h2 = std::hash<std::string_view>{}(p.second);
             return h1 ^ (h2 << 1);
         }
     };

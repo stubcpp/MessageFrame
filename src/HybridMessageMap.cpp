@@ -17,11 +17,11 @@ namespace msgframe {
     };
 
     void HybridMessageMap::map_emplace_rvalue(std::string_view device, std::string_view param, ParameterValue&& val) {
-        map_storage->map.emplace(ParameterKey{std::string(device), std::string(param)}, std::move(val));
+        map_storage->map.emplace(ParameterKey{device, param}, std::move(val));
     }
 
     void HybridMessageMap::map_emplace_lvalue(std::string_view device, std::string_view param, const ParameterValue& val) {
-        map_storage->map.emplace(ParameterKey{std::string(device), std::string(param)}, val);
+        map_storage->map.emplace(ParameterKey{device, param}, val);
     }
 
     ParameterValue* HybridMessageMap::map_find_mutable(std::string_view device, std::string_view param) noexcept {
@@ -151,7 +151,11 @@ namespace msgframe {
             // Searching the vector without creating any temporary strings.
             auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
                                    [device, param](const std::pair<ParameterKey, ParameterValue>& pair) {
-                                       return pair.first.device == device && pair.first.parameter == param;
+                                       std::string_view l_view(pair.first.full_key);
+                                       if (l_view.size() != device.size() + 1 + param.size()) return false;
+                                       if (l_view.compare(0, device.size(), device) != 0) return false;
+                                       if (l_view[device.size()] != '.') return false;
+                                       return l_view.substr(device.size() + 1) == param;
                                    });
             return (it != vector_storage.end()) ? &(it->second) : nullptr;
         } else {
@@ -163,11 +167,14 @@ namespace msgframe {
     }  
 
     const ParameterValue* HybridMessageMap::find_flat(std::string_view flat_key) const noexcept {
-        size_t dot_pos = flat_key.find('.');
-        if (dot_pos == std::string_view::npos) {
-            return find("", flat_key);
+        if (is_vector_mode) {
+            auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
+                                   [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
+            return (it != vector_storage.end()) ? &(it->second) : nullptr;
+        } else {
+            auto it = map_storage->map.find(flat_key);
+            return (it != map_storage->map.end()) ? &(it->second) : nullptr;
         }
-        return find(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1));
     }
 
     void HybridMessageMap::clear() noexcept {
@@ -209,12 +216,12 @@ namespace msgframe {
         if (is_vector_mode) {
             // Flat vector traversal (perfect L1/L2 cache locality)
             for (const auto& pair : vector_storage) {
-                callback(pair.first.device, pair.first.parameter, pair.second, user_data);
+                callback(pair.first.full_key, pair.second, user_data);
             }
         } else if (map_storage) {
             // Traversal robin_map, passing individual string components of the key
             for (const auto& pair : map_storage->map) {
-                callback(pair.first.device, pair.first.parameter, pair.second, user_data);
+                callback(pair.first.full_key, pair.second, user_data);
             }
         }
     }
@@ -226,56 +233,14 @@ namespace msgframe {
 
         pk->pack_map(size());
 
-        // Use a fixed buffer on the stack (128 bytes probably covers 99% of telemetry keys)
-        char shared_stack_buf[128];
-
         if (is_vector_mode) {
             for (const auto& pair : vector_storage) {
-                // Total length of the future "device.param" string
-                size_t total_size = pair.first.device.size() + 1 + pair.first.parameter.size();
-
-                if (total_size <= sizeof(shared_stack_buf)) {
-                    char* ptr = shared_stack_buf;
-                    std::memcpy(ptr, pair.first.device.data(), pair.first.device.size());
-                    ptr += pair.first.device.size();
-                    *ptr = '.';
-                    ptr++;
-                    std::memcpy(ptr, pair.first.parameter.data(), pair.first.parameter.size());
-
-                    // Pack directly from the buffer onto the stack
-                    pk->pack_str(total_size);                                                  // Record the row header and length
-                    pk->pack_str_body(static_cast<const char*>(shared_stack_buf), total_size); // Copy bytes from the stack to the send buffer
-
-                } else {
-                    // Fallback for extra-long keys
-                    std::string long_key;
-                    long_key.reserve(total_size);
-                    long_key.append(pair.first.device).append(".").append(pair.first.parameter);
-                    pk->pack(long_key);
-                }
-
+                pk->pack(pair.first.full_key); // Instant whole string packing
                 pair.second.pack(pk);
             }
         } else if (map_storage) {
             for (const auto& pair : map_storage->map) {
-                size_t total_size = pair.first.device.size() + 1 + pair.first.parameter.size();
-
-                if (total_size <= sizeof(shared_stack_buf)) {
-                    char* ptr = shared_stack_buf;
-                    std::memcpy(ptr, pair.first.device.data(), pair.first.device.size());
-                    ptr += pair.first.device.size();
-                    *ptr = '.';
-                    ptr++;
-                    std::memcpy(ptr, pair.first.parameter.data(), pair.first.parameter.size());
-
-                    pk->pack_str(total_size);
-                    pk->pack_str_body(static_cast<const char*>(shared_stack_buf), total_size);
-                } else {
-                    std::string long_key;
-                    long_key.reserve(total_size);
-                    long_key.append(pair.first.device).append(".").append(pair.first.parameter);
-                    pk->pack(long_key);
-                }
+                pk->pack(pair.first.full_key);
                 pair.second.pack(pk);
             }
         }
@@ -292,41 +257,22 @@ namespace msgframe {
         
         // If there are many elements at once, migrate to the map immediately
         if (map_size > SMALL_CAPACITY) {
-            map_storage = std::make_unique<MapImpl>();
+            if (!map_storage) map_storage = std::make_unique<MapImpl>();
             map_storage->map.reserve(map_size);
             is_vector_mode = false;
         }
 
         const auto* ptr = obj.via.map.ptr;
         for (size_t i = 0; i < map_size; ++i) {
-            // Read the key as string_view (0 copies and 0 allocations!)
-            std::string_view flat_key = (ptr + i)->key.as<std::string_view>();
-
-            // Split the key into device and parameter
-            std::string_view device_sv;
-            std::string_view param_sv;
-
-            size_t dot_pos = flat_key.find('.');
-            if (dot_pos == std::string_view::npos) {
-                device_sv = "";
-                param_sv = flat_key;
-            } else {
-                device_sv = flat_key.substr(0, dot_pos);
-                param_sv = flat_key.substr(dot_pos + 1);
-            }
+            std::string key = (ptr + i)->key.as<std::string>();
 
             ParameterValue val;
             val.unpack(&(ptr + i)->val);
 
-            // Create ParameterKey directly from parsed string_view
             if (is_vector_mode) {
-                vector_storage.emplace_back(
-                    ParameterKey{ std::string(device_sv), std::string(param_sv) },
-                    std::move(val));
+                vector_storage.emplace_back(ParameterKey{std::move(key)}, std::move(val));
             } else {
-                map_storage->map.emplace(
-                    ParameterKey{ std::string(device_sv), std::string(param_sv) },
-                    std::move(val));
+                map_storage->map.emplace(ParameterKey{std::move(key)}, std::move(val));
             }
         }
     }

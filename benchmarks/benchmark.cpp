@@ -15,7 +15,7 @@
     #error "Unsupported compiler for high-resolution timing"
 #endif
 
-// Перерахування для красивого тестування строгої типізації хедера
+// Enum for beautiful testing of strong header typing
 enum class MyMsgId : int32_t {
     TELEMETRY_PACKET = 1001,
     COMMAND_PACKET = 1002
@@ -26,16 +26,11 @@ enum class MyMsgType : int32_t {
     CRITICAL = 2
 };
 
-// Простий колбек для демонстрації швидкого обходу ітератором
-void printParamCallback(std::string_view device, std::string_view param, const msgframe::ParameterValue& val, void* /*user_data*/) {
-    std::cout << "  [Iterate] " << device << "." << param << " = " << val.toString() << "\n";
+// A simple callback to demonstrate fast iterator traversal
+void printParamCallback(std::string_view flat_key, const msgframe::ParameterValue& val, void* /*user_data*/) {
+    std::cout << "  [Iterate] " << flat_key << " = " << val.toString() << "\n";
 }
 
-// ----------------------------------------------------------------
-// Параметри запуску бенчмарку, винесені з тіла main() так, щоб
-// ITERATIONS і PARAMS_COUNT можна було задавати без перекомпіляції
-// і без закомментовування шматків коду.
-// ----------------------------------------------------------------
 struct BenchmarkConfig {
     size_t iterations = 100'000;
     size_t params_count = 150;
@@ -67,12 +62,12 @@ BenchmarkConfig parseArgs(int argc, char** argv) {
     return cfg;
 }
 
-// Універсальна обгортка для CPUID
+// Universal wrapper for CPUID
 void native_cpuid(int cpu_info[4], unsigned int function_id) {
 #ifdef _MSC_VER
     __cpuid(cpu_info, function_id);
 #elif defined(__GNUC__) || defined(__clang__)
-    // GCC/Clang вимагають передачі посилань на окремі змінні
+    // GCC/Clang require passing references to individual variables
     __get_cpuid(function_id,
                 (unsigned int*)&cpu_info[0],
                 (unsigned int*)&cpu_info[1],
@@ -83,10 +78,10 @@ void native_cpuid(int cpu_info[4], unsigned int function_id) {
 
 // Get the cpu model name
 std::string get_cpu_model_name() {
-    // Масив для збереження результатів інструкції cpuid (регістри EAX, EBX, ECX, EDX)
+    // Array for storing the results of the cpuid instruction (registers EAX, EBX, ECX, EDX)
     int cpu_info[4] = { 0 };
 
-    // Перевіряємо, чи підтримує процесор розширені функції cpuid
+    // Checking if the processor supports advanced cpuid functions
     native_cpuid(cpu_info, 0x80000000);
     unsigned int nExIds = cpu_info[0];
 
@@ -96,15 +91,15 @@ std::string get_cpu_model_name() {
 
     char cpu_brand_string[49] = { 0 };
 
-    // Назва моделі збирається послідовно з трьох функцій: 0x80000002, 0x80000003, 0x80000004
+    // The model name is assembled sequentially from three functions: 0x80000002, 0x80000003, 0x80000004
     for (unsigned int i = 0x80000002; i <= 0x80000004; ++i) {
         native_cpuid(cpu_info, i);
 
-        // Копіюємо 16 байт з регістрів EAX, EBX, ECX, EDX
+        // Copy 16 bytes from registers EAX, EBX, ECX, EDX
         std::memcpy(cpu_brand_string + (i - 0x80000002) * 16, cpu_info, sizeof(cpu_info));
     }
 
-    // Очищаємо можливі початкові пробіли, які іноді повертає Intel
+    // Cleaning up possible leading spaces that Intel sometimes returns
     std::string model_name(cpu_brand_string);
     size_t first_letter = model_name.find_first_not_of(" ");
     if (first_letter != std::string::npos) {
@@ -115,14 +110,11 @@ std::string get_cpu_model_name() {
 }
 
 // ----------------------------------------------------------------
-// Виносимо сам бенчмарк у окрему функцію — раніше довелось би
-// закоментовувати "стару" гілку з 4 параметрами і розкоментовувати
-// "нову" з 150, щоб перевірити різні конфігурації. Тепер це один
-// прохід, що приймає params_count/iterations як аргументи.
+// Move the benchmark itself into a separate function.
 // ----------------------------------------------------------------
 void runBenchmark(const BenchmarkConfig& cfg) {
-    // КРОК 1: Пул ключів формується ОДИН раз перед стартом вимірювання,
-    // незалежно від PARAMS_COUNT — масштабується разом з cfg.params_count.
+    // STEP 1: The key pool is generated ONCE before the measurement starts,
+    // regardless of PARAMS_COUNT — it scales together with cfg.params_count.
     std::vector<std::string> key_pool;
     key_pool.reserve(cfg.params_count);
     for (size_t p = 0; p < cfg.params_count; ++p) {
@@ -152,13 +144,13 @@ void runBenchmark(const BenchmarkConfig& cfg) {
 
         auto t0 = std::chrono::high_resolution_clock::now();
         for (size_t p = 0; p < cfg.params_count; ++p) {
-            // КРОК 2: Значення параметра залежить ТІЛЬКИ від p, а не від i.
-            // Завдяки цьому розмір кожного повідомлення (і відповідно msgpack
-            // varint-кодування) лишається сталим незалежно від ITERATIONS —
-            // інакше "Avg Packed Size" і похідні від нього метрики плавають
-            // між прогонами з різним числом ітерацій (значення p+i росте
-            // разом з i, а msgpack кодує великі цілі довшими varint-послідовностями:
-            // 0-127 -> 1 байт, 128-65535 -> 2-3 байти, 65536+ -> 5 байт).
+            // STEP 2: The parameter value depends ONLY on p, not on i.
+            // This keeps the size of each message (and therefore msgpack
+            // varint encoding) constant regardless of ITERATIONS —
+            // otherwise "Avg Packed Size" and its derived metrics float
+            // between runs with different iteration numbers (the value of p+i grows
+            // with i, and msgpack encodes large integers with longer varint sequences:
+            // 0-127 -> 1 byte, 128-65535 -> 2-3 bytes, 65536+ -> 5 bytes).
             std::string_view static_param_name = key_pool[p];
             bench_msg.add("dev", static_param_name, msgframe::VALUE(static_cast<int64_t>(p)));
         }
@@ -214,7 +206,7 @@ int main(int argc, char** argv) {
     std::cout << "==================================================\n\n";
 
     // ----------------------------------------------------------------
-    // ЧАСТИНА 1: ДЕМОНСТРАЦІЯ РОБОТИ З API
+    // PART 1: API DEMONSTRATION
     // ----------------------------------------------------------------
     std::cout << "--- Step 1: Creating and populating a message ---\n";
 
@@ -248,10 +240,10 @@ int main(int argc, char** argv) {
     std::cout << "\n";
 
     // ----------------------------------------------------------------
-    // ЧАСТИНА 2: ВИСОКОТОЧНИЙ БЕНЧМАРК ПРОДУКТИВНОСТІ
-    // Тепер один прохід обслуговує і "маленькі" (vector-режим, < 128
-    // параметрів), і "великі" (map-режим, > 128 параметрів) конфігурації —
-    // достатньо передати --params 4 або --params 150 з командного рядка.
+    // PART 2: HIGH-PRECISION PERFORMANCE BENCHMARK
+    // Now a single pass handles both "small" (vector mode, < 128
+    // parameters) and "large" (map mode, > 128 parameters) configurations —
+    // just pass --params 4 or --params 150 from the command line.
     // ----------------------------------------------------------------
     std::cout << "--- Step 3: Performance Benchmark ---\n";
     std::cout << "CPU: " << get_cpu_model_name() << '\n';
