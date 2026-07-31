@@ -137,7 +137,7 @@ cache-friendly vector storage without entering map hashing routines.
  
 |              Metric                 |              Value                    |
 |-------------------------------------|---------------------------------------|
-| Avg time per message                | 22.03 us                              |
+| Avg time per message                | 10.41 us                              |
 | Throughput                          | 96,009 messages/sec (190.07 MB/sec)   |
 | Avg packed size                     | 2,075 bytes                           |
 | `add` / `serialize` / `deserialize` | 2.81 us / 2.66 us / 4.54 us           |
