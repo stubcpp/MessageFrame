@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-test:
-    name: Build (${{ matrix.os }} - ${{ matrix.compiler }})
+    name: Build & Test (${{ matrix.os }} - ${{ matrix.compiler }})
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -28,7 +28,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4.2.2
       with:
-        submodules: recursive # Надійно викачує залежності з репозиторію
+        submodules: recursive
 
     - name: Set up Build Environment
       run: |
@@ -40,8 +40,13 @@ jobs:
         cmake -B build \
           -DCMAKE_BUILD_TYPE=Release \
           -DMSGFRAME_BUILD_EXAMPLES=ON \
-          -DMSGFRAME_BUILD_TESTS=OFF \
-          -DMSGFRAME_BUILD_BENCHMARKS=OFF
+          -DMSGFRAME_BUILD_TESTS=ON \
+          -DMSGFRAME_BUILD_BENCHMARKS=ON
 
-    - name: Build Library and Examples
-      run: cmake --build build --config Release
+    - name: Build Everything
+      run: cmake --build build --config Release --parallel 4
+
+    - name: Run Unit Tests
+      run: |
+        cd build
+        ctest --output-on-failure -C Release

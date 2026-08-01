@@ -100,6 +100,11 @@ option(MSGFRAME_BUILD_BENCHMARKS "Build messageframe performance benchmarks" ON)
 if(MSGFRAME_BUILD_BENCHMARKS)
     add_executable(messageframe_benchmark benchmarks/benchmark.cpp)
     target_link_libraries(messageframe_benchmark PRIVATE msg_frame)
+    # Add dependencies only to the benchmark:
+    target_include_directories(messageframe_benchmark PRIVATE
+        ${ROBIN_MAP_INCLUDE_DIR}
+        ${MSGPACK_INCLUDE_DIR}
+    )
 endif()
 
 # ------------------------------------------------------------------
@@ -117,6 +122,12 @@ if(MSGFRAME_BUILD_TESTS)
     # tests/test_framework.hpp is located next to the .cpp itself —
     # no additional include_directories are needed, because #include "test_framework.hpp"
     # resolves relative to the directory of the file that includes it.
+
+    # Add dependencies only to tests:
+    target_include_directories(messageframe_tests PRIVATE
+        ${ROBIN_MAP_INCLUDE_DIR}
+        ${MSGPACK_INCLUDE_DIR}
+    )
 
     add_test(NAME HybridMessageMapTests COMMAND messageframe_tests)
 endif()
