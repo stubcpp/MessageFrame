@@ -29,7 +29,7 @@ namespace msgframe {
         static constexpr size_t SMALL_CAPACITY = 128;
 
         HybridMessageMap();
-        ~HybridMessageMap();
+        ~HybridMessageMap() noexcept;
 
         // Moving is allowed, copying is prohibited
         HybridMessageMap(const HybridMessageMap&) = delete;

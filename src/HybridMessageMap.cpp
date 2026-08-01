@@ -49,7 +49,7 @@ namespace msgframe {
         vector_storage.reserve(SMALL_CAPACITY);
     }
 
-    HybridMessageMap::~HybridMessageMap() {}; 
+    HybridMessageMap::~HybridMessageMap() noexcept {};
 
     // Moving objects
     HybridMessageMap::HybridMessageMap(HybridMessageMap&& other) noexcept 
