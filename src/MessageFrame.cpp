@@ -12,7 +12,6 @@ namespace msgframe {
     }
 
     void MessageFrame::clear() noexcept {
-        m_header.updateTimestamp();
         parameters.clear();
         attachments.clear();
     }
