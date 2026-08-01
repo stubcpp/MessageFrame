@@ -155,7 +155,7 @@ namespace msgframe {
                                        std::string_view l_view(pair.first.full_key);
                                        if (l_view.size() != device.size() + 1 + param.size()) return false;
                                        if (l_view.compare(0, device.size(), device) != 0) return false;
-                                       if (l_view[device.size()] != '.') return false;
+                                       if (l_view[device.size()] != '\x1F') return false; //0x1F — Unit Separator (US)
                                        return l_view.substr(device.size() + 1) == param;
                                    });
             return (it != vector_storage.end()) ? &(it->second) : nullptr;
@@ -163,7 +163,11 @@ namespace msgframe {
             // Guaranteed Zero-Allocation key failure on stack (due to SSO std::string)
             std::string stack_key;
             stack_key.reserve(device.size() + 1 + param.size());
-            stack_key.append(device).append(".").append(param);
+
+            // Using "0x1F" - Unit Separator (US) - special hidden control character from ASCII table,
+            // to protect from many dots in "device" or "parameter":
+            // for example, engine.cylinder.1.temperature
+            stack_key.append(device).append("\x1F").append(param);
 
             // Map transparently looks for string_view from SSO string, which is 100% alive during the entire lookup
             auto it = map_storage->map.find(std::string_view(stack_key));
