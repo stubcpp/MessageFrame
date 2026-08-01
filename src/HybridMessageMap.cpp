@@ -160,9 +160,13 @@ namespace msgframe {
                                    });
             return (it != vector_storage.end()) ? &(it->second) : nullptr;
         } else {
-            // Thanks to transparent comparators, we search by string_view pair!
-            // No std::string is created or copied here.
-            auto it = map_storage->map.find(std::make_pair(device, param));
+            // Guaranteed Zero-Allocation key failure on stack (due to SSO std::string)
+            std::string stack_key;
+            stack_key.reserve(device.size() + 1 + param.size());
+            stack_key.append(device).append(".").append(param);
+
+            // Map transparently looks for string_view from SSO string, which is 100% alive during the entire lookup
+            auto it = map_storage->map.find(std::string_view(stack_key));
             return (it != map_storage->map.end()) ? &(it->second) : nullptr;
         }
     }  
@@ -200,7 +204,7 @@ namespace msgframe {
 		
 		// Move data from vector to map without copying values
         for (auto& pair : vector_storage) {
-            map_storage->map.emplace(std::move(pair.first), std::move(pair.second));
+            map_storage->map.emplace(ParameterKey{ pair.first.full_key }, std::move(pair.second));
         }
 
         vector_storage.clear();

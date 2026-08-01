@@ -49,18 +49,7 @@ namespace msgframe {
             return lhs.full_key == rhs.full_key;
         }
 
-        // Comparing the internal full_key with the pair (device, param)
-        bool operator()(const ParameterKey& lhs, std::pair<std::string_view, std::string_view> rhs) const noexcept {
-            std::string_view l_view(lhs.full_key);
-            if (l_view.size() != rhs.first.size() + 1 + rhs.second.size()) return false;
-
-            // Direct step-by-step comparison without unnecessary creation of substring objects
-            return l_view.compare(0, rhs.first.size(), rhs.first) == 0 &&
-                l_view[rhs.first.size()] == '.' &&
-                l_view.compare(rhs.first.size() + 1, rhs.second.size(), rhs.second) == 0;
-
-        }
-
+        // Instead of std::pair now only one flat string_view
         bool operator()(const ParameterKey& lhs, std::string_view rhs_flat) const noexcept {
             return lhs.full_key == rhs_flat;
         }
@@ -70,10 +59,6 @@ namespace msgframe {
     struct ParameterKeyHash {
         using is_transparent = void; // Allows hashing string_view on the fly
 
-        // Covers device+"."+param comfortably for realistic key names (README recommends
-        // keeping them short for SSO anyway); pathologically long keys fall back to the heap.
-        static constexpr std::size_t kStackBufSize = 256;
-
         // Hash from the finished key
         std::size_t operator()(const ParameterKey& k) const noexcept {
             return std::hash<std::string>{}(k.full_key);
@@ -82,26 +67,6 @@ namespace msgframe {
         // Hash from an already-flattened "device.param" string_view (called during find)
         std::size_t operator()(std::string_view flat_key) const noexcept {
             return std::hash<std::string_view>{}(flat_key);
-        }
-
-        // Hashes (device, param) as if it were the concatenated "device.param" string,
-        // by actually assembling those exact bytes in a stack buffer (no heap allocation
-        // for the common case) and reusing std::hash<string_view> -- keeps this bit-for-bit
-        // consistent with the two overloads above.
-        std::size_t operator()(std::pair<std::string_view, std::string_view> p) const noexcept {
-            const std::size_t total = p.first.size() + 1 + p.second.size();
-            if (total <= kStackBufSize) {
-                char buf[kStackBufSize]{ 0 };
-                std::memcpy(buf, p.first.data(), p.first.size());
-                buf[p.first.size()] = '.';
-                std::memcpy(buf + p.first.size() + 1, p.second.data(), p.second.size());
-                return std::hash<std::string_view>{}(std::string_view(buf, total));
-            }
-            // Rare fallback for keys longer than kStackBufSize.
-            std::string tmp;
-            tmp.reserve(total);
-            tmp.append(p.first).append(1, '.').append(p.second);
-            return std::hash<std::string>{}(tmp);
         }
     };
 
