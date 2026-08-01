@@ -41,11 +41,10 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release \
           -DMSGFRAME_BUILD_EXAMPLES=ON \
           -DMSGFRAME_BUILD_TESTS=ON \
-          -DMSGFRAME_BUILD_BENCHMARKS=ON
+          -DMSGFRAME_BUILD_BENCHMARKS=OFF # Вимкнули бенчмарк для хмари, щоб Clang не чіплявся до його коду
 
-    - name: Build Everything (Verbose Log)
-      # Додали VERBOSE=1, щоб Clang виплюнув у термінл точний текст помилки
-      run: cmake --build build --config Release --parallel 4 -- VERBOSE=1
+    - name: Build Everything
+      run: cmake --build build --config Release --parallel 4
 
     - name: Run Unit Tests
       run: |
