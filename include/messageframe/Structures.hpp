@@ -32,7 +32,7 @@ namespace msgframe {
         // Optimized constructor that stitches the key in one pass
         ParameterKey(std::string_view device, std::string_view param) {
             full_key.reserve(device.size() + 1 + param.size());
-            full_key.append(device).append(".").append(param);
+            full_key.append(device).append("\x1F").append(param); // Using "\x1F" as separator
         }
 
         bool operator==(const ParameterKey& other) const noexcept {

@@ -78,7 +78,7 @@ namespace msgframe {
     }
 
     void HybridMessageMap::add_flat(std::string_view flat_key, const ParameterValue& val) {
-        size_t dot_pos = flat_key.find('.');
+        size_t dot_pos = flat_key.find('\x1F');
         if (dot_pos == std::string_view::npos) {
             add_impl("", flat_key, val);
         } else {
@@ -87,7 +87,7 @@ namespace msgframe {
     }
 
     void HybridMessageMap::add_flat(std::string_view flat_key, ParameterValue&& val) {
-        size_t dot_pos = flat_key.find('.');
+        size_t dot_pos = flat_key.find('\x1F');
         if (dot_pos == std::string_view::npos) {
             add_impl("", flat_key, std::move(val));
         } else {
@@ -104,7 +104,7 @@ namespace msgframe {
     }
 
     void HybridMessageMap::set_flat(std::string_view flat_key, const ParameterValue& val) {
-        size_t dot_pos = flat_key.find('.');
+        size_t dot_pos = flat_key.find('\x1F');
         if (dot_pos == std::string_view::npos) {
             set_impl("", flat_key, val);
         } else {
@@ -113,7 +113,7 @@ namespace msgframe {
     }
     
     void HybridMessageMap::set_flat(std::string_view flat_key, ParameterValue&& val) {
-        size_t dot_pos = flat_key.find('.');
+        size_t dot_pos = flat_key.find('\x1F');
         if (dot_pos == std::string_view::npos) {
             set_impl("", flat_key, std::move(val));
         } else {
@@ -130,7 +130,7 @@ namespace msgframe {
     }
 
     bool HybridMessageMap::update_flat(std::string_view flat_key, const ParameterValue& val) {
-        size_t dot_pos = flat_key.find('.');
+        size_t dot_pos = flat_key.find('\x1F');
         if (dot_pos == std::string_view::npos) {
             return update_impl("", flat_key, val);
         } else {
@@ -139,7 +139,7 @@ namespace msgframe {
     }
 
     bool HybridMessageMap::update_flat(std::string_view flat_key, ParameterValue&& val) {
-        size_t dot_pos = flat_key.find('.');
+        size_t dot_pos = flat_key.find('\x1F');
         if (dot_pos == std::string_view::npos) {
             return update_impl("", flat_key, std::move(val));
         } else {

@@ -108,7 +108,7 @@ namespace msgframe {
     
     void ParameterValue::setValue(const std::string& v) {
         if (type == Type::String) {
-            as_string() = v; // Перевикористовуємо купу (Heap reuse!)
+            as_string() = v; // reusing heap (Heap reuse!)
         } else {
             reset();
             type = Type::String;
@@ -118,7 +118,7 @@ namespace msgframe {
 	
     void ParameterValue::setValue(std::string&& v) noexcept {
         if (type == Type::String) {
-            as_string() = std::move(v); // Перевикористовуємо купу через move
+            as_string() = std::move(v); // reusing heap by move
         } else {
             reset();
             type = Type::String;
