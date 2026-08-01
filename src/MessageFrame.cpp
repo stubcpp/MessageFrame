@@ -20,6 +20,9 @@ namespace msgframe {
     // Serialization of the entire frame (Header + Parameters + Attachments)
     void MessageFrame::serialize(std::vector<uint8_t>& output_buffer) const {
         output_buffer.clear();
+        if (output_buffer.capacity() < 512) {
+            output_buffer.reserve(512); // Prevents the first 4-5 heap reallocations
+        }
         VectorBuffer vbuf(output_buffer);
         msgpack::packer<VectorBuffer> pk(&vbuf);
 
@@ -78,18 +81,16 @@ namespace msgframe {
                 for (size_t i = 0; i < attach_count; ++i) {
                     if (attach_ptr[i].type == msgpack::type::ARRAY && attach_ptr[i].via.array.size >= 2) {
                         const auto* pair_ptr = attach_ptr[i].via.array.ptr;
-                        Attachment attach;
-                        attach.name = pair_ptr[0].as<std::string>();
-
-                        // Read binary data
+                        attachments.emplace_back(Attachment{
+                            pair_ptr[0].as<std::string>(),
+                            std::vector<uint8_t>()
+                        });
+                        auto& raw_data = attachments.back().raw_data;
                         if (pair_ptr[1].type == msgpack::type::BIN) {
                             size_t bin_size = pair_ptr[1].via.bin.size;
-                            const char* bin_data = pair_ptr[1].via.bin.ptr;
-                            attach.raw_data.resize(bin_size);
-                            std::memcpy(attach.raw_data.data(), bin_data, bin_size);
+                            raw_data.resize(bin_size);
+                            std::memcpy(raw_data.data(), pair_ptr[1].via.bin.ptr, bin_size);
                         }
-
-                        attachments.push_back(std::move(attach));
                     }
                 }
             }
