@@ -25,11 +25,12 @@ namespace msgframe {
     }
 
     ParameterValue* HybridMessageMap::map_find_mutable(std::string_view device, std::string_view param) noexcept {
-        auto it = map_storage->map.find(std::make_pair(device, param));
-        if (it != map_storage->map.end()) {
-            return const_cast<ParameterValue*>(&(it->second));
-        }
-        return nullptr;
+        // Make the current object (*this) const so that we can call the const version of find()
+        const HybridMessageMap* const_this = this;
+        const ParameterValue* const_res = const_this->find(device, param);
+
+        // Unconst the result ONLY.
+        return const_cast<ParameterValue*>(const_res);
     }
 
     // Instantiation for basic methods (with two key components device + param)
@@ -150,7 +151,7 @@ namespace msgframe {
         if (is_vector_mode) {
             // Searching the vector without creating any temporary strings.
             auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                                   [device, param](const std::pair<ParameterKey, ParameterValue>& pair) {
+                                   [device, param](const auto& pair) {
                                        std::string_view l_view(pair.first.full_key);
                                        if (l_view.size() != device.size() + 1 + param.size()) return false;
                                        if (l_view.compare(0, device.size(), device) != 0) return false;
