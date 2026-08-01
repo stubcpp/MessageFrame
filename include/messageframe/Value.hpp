@@ -84,9 +84,6 @@ namespace msgframe {
             double doubleValue;
             bool boolValue;
             alignas(std::string) char stringBuffer[sizeof(std::string)];
-
-            ValueUnion() noexcept { intValue = 0; }
-            ~ValueUnion() noexcept {}
         } value;
     };
 

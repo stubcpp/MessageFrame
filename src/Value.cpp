@@ -1,9 +1,7 @@
 #include "messageframe/Value.hpp"
 #include "messageframe/Structures.hpp"
 #include <msgpack.hpp> 
-#include <stdexcept>
 #include <string>
-#include <new>
 
 
 namespace msgframe {
@@ -51,19 +49,23 @@ namespace msgframe {
 
     // Copy Ctor
     ParameterValue::ParameterValue(const ParameterValue& other) : type(other.type) {
-        if (type == Type::String) {
-            ::new (value.stringBuffer) std::string(other.as_string());
-        } else {
-            value = other.value;
+        switch (type) {
+        case Type::Int64:  value.intValue = other.value.intValue; break;
+        case Type::Double: value.doubleValue = other.value.doubleValue; break;
+        case Type::Bool:   value.boolValue = other.value.boolValue; break;
+        case Type::String: ::new (value.stringBuffer) std::string(other.as_string()); break;
+        default:           value.intValue = 0; break;
         }
     }
 
 	// Move Ctor
     ParameterValue::ParameterValue(ParameterValue&& other) noexcept : type(other.type) {
-        if (type == Type::String) {
-            ::new (value.stringBuffer) std::string(std::move(other.as_string()));
-        } else {
-            value = other.value;
+        switch (type) {
+        case Type::Int64:  value.intValue = other.value.intValue; break;
+        case Type::Double: value.doubleValue = other.value.doubleValue; break;
+        case Type::Bool:   value.boolValue = other.value.boolValue; break;
+        case Type::String: ::new (value.stringBuffer) std::string(std::move(other.as_string())); break;
+        default:           value.intValue = 0; break;
         }
         other.reset();
     }
@@ -72,10 +74,12 @@ namespace msgframe {
         if (this != &other) {
             reset();
             type = other.type;
-            if (type == Type::String) {
-                ::new (value.stringBuffer) std::string(other.as_string());
-            } else {
-                value = other.value;
+            switch (type) {
+            case Type::Int64:  value.intValue = other.value.intValue; break;
+            case Type::Double: value.doubleValue = other.value.doubleValue; break;
+            case Type::Bool:   value.boolValue = other.value.boolValue; break;
+            case Type::String: ::new (value.stringBuffer) std::string(other.as_string()); break;
+            default:           value.intValue = 0; break;
             }
         }
         return *this;
@@ -85,10 +89,12 @@ namespace msgframe {
         if (this != &other) {
             reset();
             type = other.type;
-            if (type == Type::String) {
-                ::new (value.stringBuffer) std::string(std::move(other.as_string()));
-            } else {
-                value = other.value;
+            switch (type) {
+            case Type::Int64:  value.intValue = other.value.intValue; break;
+            case Type::Double: value.doubleValue = other.value.doubleValue; break;
+            case Type::Bool:   value.boolValue = other.value.boolValue; break;
+            case Type::String: ::new (value.stringBuffer) std::string(std::move(other.as_string())); break;
+            default:           value.intValue = 0; break;
             }
             other.reset();
         }
