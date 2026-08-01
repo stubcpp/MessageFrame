@@ -1,0 +1,52 @@
+name: C++ CI Pipeline
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }} - ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: g++
+            cc: gcc
+            cxx: g++
+          - os: macos-latest
+            compiler: clang++
+            cc: clang
+            cxx: clang++
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive # Automatically pulls up robin_map and msgpack
+
+    - name: Set up Build Environment
+      run: |
+        echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DMSGFRAME_BUILD_EXAMPLES=ON \
+          -DMSGFRAME_BUILD_TESTS=ON \
+          -DMSGFRAME_BUILD_BENCHMARKS=ON
+
+    - name: Build Libraries and Binaries
+      run: cmake --build build --config Release --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+    - name: Run Unit Tests
+      run: |
+        cd build
+        ctest --output-on-failure -C Release
