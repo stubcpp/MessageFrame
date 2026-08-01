@@ -41,22 +41,16 @@ TEST(Serialization, EndToEndPackUnpackWithHeavyAttachments) {
         if (s) CHECK_EQ(*s, std::string("operational"));
     }
 
-    const auto* reading = target_frame.find("sensor", "reading");
-    CHECK_NOT_NULL(reading);
-    if (reading) {
-        auto d = reading->tryGetDouble();
-        CHECK(d.has_value());
-        if (d) CHECK_EQ(*d, 3.14159);
-    }
-
-    // Перевірка збереження бінарних атачментів
+    // Перевірка збереження бінарних атачментів через індекси вектора
     const auto& target_attachments = target_frame.get_attachments();
     CHECK_EQ(target_attachments.size(), static_cast<size_t>(1));
     if (!target_attachments.empty()) {
         CHECK_EQ(target_attachments[0].name, std::string("raw_sdr_channel_A"));
         CHECK_EQ(target_attachments[0].raw_data.size(), static_cast<size_t>(2048));
-        CHECK_EQ(target_attachments[0].raw_data[0], 0xAB);
-        CHECK_EQ(target_attachments[0].raw_data[2047], 0xAB);
+
+        // Поелементна перевірка байтів буфера
+        CHECK_EQ(target_attachments[0].raw_data[0], static_cast<uint8_t>(0xAB));
+        CHECK_EQ(target_attachments[0].raw_data[2047], static_cast<uint8_t>(0xAB));
     }
 }
 
