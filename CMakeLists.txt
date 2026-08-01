@@ -9,6 +9,18 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Global library type control (STATIC/SHARED) via a single option
+option(MSGFRAME_BUILD_SHARED "Build shared library instead of static" OFF)
+set(BUILD_SHARED_LIBS ${MSGFRAME_BUILD_SHARED})
+
+# Enable Link-Time Optimization (LTO) for Release builds
+include(CheckIPOSupported)
+check_ipo_supported(RESULT lto_supported OUTPUT lto_error)
+if(lto_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL ON)
+endif()
+
 # Global compiler optimizations for ALL targets in the project (library, tests, etc.)
 if(MSVC)
     # /MP - multi-threaded build (always safe)
@@ -20,7 +32,12 @@ if(MSVC)
     add_compile_options($<$<CONFIG:Release,MinSizeRel>:/O2> $<$<CONFIG:Release,MinSizeRel>:/Oi>)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
-    add_compile_options($<$<CONFIG:Release,MinSizeRel>:-O3> $<$<CONFIG:Release,MinSizeRel>:-march=native>)
+    add_compile_options($<$<CONFIG:Release,MinSizeRel>:-O3>)
+
+    # Safely add -march=native (ignore AppleClang on macOS, where it breaks the build)
+    if(NOT APPLE)
+        add_compile_options($<$<CONFIG:Release,MinSizeRel>:-march=native>)
+    endif()
 endif()
 
 # Local paths to submodules in third_party (according to your folders)
@@ -30,28 +47,15 @@ set(MSGPACK_INCLUDE_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/msgpack/inclu
 # ------------------------------------------------------------------
 # LIBRARY
 # ------------------------------------------------------------------
+add_library(msg_frame
+    src/Value.cpp
+    src/Header.cpp
+    src/HybridMessageMap.cpp
+    src/MessageFrame.cpp
+)
 
-# Option: build static or shared library
-# Default is STATIC, but SHARED can be enabled:
-option(MSGFRAME_BUILD_SHARED "Build shared library instead of static" OFF)
-
-if(MSGFRAME_BUILD_SHARED)
-    # If the user enables this option, a DLL/so will be created
-    add_library(msg_frame SHARED
-        src/Value.cpp
-        src/Header.cpp
-        src/HybridMessageMap.cpp
-        src/MessageFrame.cpp
-    )
-else()
-    # By default — static library
-    add_library(msg_frame STATIC
-        src/Value.cpp
-        src/Header.cpp
-        src/HybridMessageMap.cpp
-        src/MessageFrame.cpp
-    )
-endif()
+# Automatic symbol export for Windows DLLs (if SHARED is enabled)
+set_target_properties(msg_frame PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 # PUBLIC: The user only sees our include folder
 # (include/messageframe/*.hpp -> #include <messageframe/Xxx.hpp>)
