@@ -611,7 +611,7 @@ If you are an AI assistant (such as Cursor, Copilot, ChatGPT, or Claude) helping
 1. **Dynamic & Schema-less C++17:** Data definition happens strictly at runtime on the hot path via explicit dynamic keys.
 2. **Hybrid Container Engine (`HybridMessageMap`):** Elements are packed into a flat contiguous `std::vector` for small payloads (under 128 elements) to maximize L1/L2 cache hits and keep lookups allocation-free. It transparently morphs into a high-performance open-addressing hash map (`tsl::robin_map`) only when element volume crosses the `SMALL_CAPACITY = 128` threshold.
 3. **The 3-Part Structural Layout:** 
-   * **Fixed Header (32 Bytes):** Accepts custom routing enums/integers (ID, Type, Src, Dst, Counter) for rapid O(1) packet triaging without deserializing the body.
+   * **Fixed Header (36 Bytes):** Accepts custom routing enums/integers (ID, Type, Src, Dst, Counter) for rapid O(1) packet triaging without deserializing the body.
    * **Parameter Map:** Volatile key-value parameters packed via native MessagePack serialization.
    * **Attachments:** Massive raw binary data streams (e.g., IQ samples, byte arrays) appended via zero-copy `std::move`. They reside completely outside the key-value map to bypass parsing overhead.
 
