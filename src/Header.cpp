@@ -1,19 +1,8 @@
 #include "messageframe/Header.hpp"
+#include "messageframe/Structures.hpp"
 #include <msgpack.hpp>
 
 namespace msgframe {
-
-    class VectorBuffer {
-    public:
-        VectorBuffer(std::vector<uint8_t>& buffer) : m_buf(buffer) {}
-        void write(const char* buf, size_t len) {
-            size_t old_size = m_buf.size();
-            m_buf.resize(old_size + len);
-            std::memcpy(m_buf.data() + old_size, buf, len);
-        }
-    private:
-        std::vector<uint8_t>& m_buf;
-    };
 
     void MessageHeader::pack(void* packer_ptr) const {
         if (!packer_ptr) return;
