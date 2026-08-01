@@ -185,30 +185,35 @@ namespace msgframe {
             return;
         }
 
-        // 1. Deserialising a data type
         uint8_t raw_type = obj.via.array.ptr[0].as<uint8_t>();
         type = static_cast<Type>(raw_type);
 
-        // 2. Deserialising a value
         const auto& val_obj = obj.via.array.ptr[1];
 
         switch (type) {
-            case Type::Int64:
-                value.intValue = val_obj.as<int64_t>();
-                break;
-            case Type::Double:
-                value.doubleValue = val_obj.as<double>();
-                break;
-            case Type::Bool:
-                value.boolValue = val_obj.as<bool>();
-                break;
-            case Type::String:
-                ::new (&value.stringBuffer) std::string(val_obj.as<std::string>());
-                break;
-            default:
-                type = Type::Unknown;
-                value.intValue = 0;
-                break;
+        case Type::Int64:
+            value.intValue = val_obj.as<int64_t>();
+            break;
+        case Type::Double:
+            value.doubleValue = val_obj.as<double>();
+            break;
+        case Type::Bool:
+            value.boolValue = val_obj.as<bool>();
+            break;
+        case Type::String: {
+            // Read as string_view (0 allocations)
+            std::string_view sv = val_obj.as<std::string_view>();
+
+            // Construct std::string in place DIRECTLY from string_view.
+            // Now ONE copy/SSO happens, and no temporary string is created at all!
+            ::new (&value.stringBuffer) std::string(sv);
+            break;
+        }
+        default:
+            type = Type::Unknown;
+            value.intValue = 0;
+            break;
         }
     }
+
 }

@@ -26,14 +26,15 @@ namespace msgframe {
     struct ParameterKey {
         std::string full_key; // Stored as "device.parameter"
 
+        // Direct transfer or copy constructor for flat methods
+        explicit ParameterKey(std::string key) : full_key(std::move(key)) {}
+        explicit ParameterKey(std::string_view key) : full_key(key) {}
+
         // Optimized constructor that stitches the key in one pass
         ParameterKey(std::string_view device, std::string_view param) {
             full_key.reserve(device.size() + 1 + param.size());
             full_key.append(device).append(".").append(param);
         }
-
-        // Direct transfer or copy constructor for flat methods
-        explicit ParameterKey(std::string key) : full_key(std::move(key)) {}
 
         bool operator==(const ParameterKey& other) const noexcept {
             return full_key == other.full_key;

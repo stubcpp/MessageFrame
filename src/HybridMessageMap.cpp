@@ -248,32 +248,40 @@ namespace msgframe {
 
     // MessagePack parameter map deserialization
     void HybridMessageMap::unpack(const void* object_ptr) {
-        clear();
+        clear(); 
 
         const auto& obj = *static_cast<const msgpack::object*>(object_ptr);
         if (obj.type != msgpack::type::MAP) return;
 
-        size_t map_size = obj.via.map.size;
-        
-        // If there are many elements at once, migrate to the map immediately
+        const size_t map_size = obj.via.map.size;
+
         if (map_size > SMALL_CAPACITY) {
             if (!map_storage) map_storage = std::make_unique<MapImpl>();
+            // Reserve is needed for a map because robin_map can dump capacity,
+            // or its reuse works differently than in vector
             map_storage->map.reserve(map_size);
             is_vector_mode = false;
+        }
+        else {
+            is_vector_mode = true;
         }
 
         const auto* ptr = obj.via.map.ptr;
         for (size_t i = 0; i < map_size; ++i) {
-            std::string key = (ptr + i)->key.as<std::string>();
+            // Getting string_view WITHOUT ANY COPYING OR ALLOCATION
+            std::string_view key_view = (ptr + i)->key.as<std::string_view>();
 
             ParameterValue val;
             val.unpack(&(ptr + i)->val);
 
             if (is_vector_mode) {
-                vector_storage.emplace_back(ParameterKey{std::move(key)}, std::move(val));
-            } else {
-                map_storage->map.emplace(ParameterKey{std::move(key)}, std::move(val));
+                // Construct ParameterKey IN PLACE directly from string_view.
+                vector_storage.emplace_back(ParameterKey{ key_view }, std::move(val));
+            }
+            else {
+                map_storage->map.emplace(ParameterKey{ key_view }, std::move(val));
             }
         }
     }
+
 } // namespace msgframe
