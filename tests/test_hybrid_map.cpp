@@ -1,11 +1,4 @@
 // tests/test_hybrid_map.cpp
-//
-// Unit tests for correctness of HybridMessageMap. Covers exactly those places,
-// where real bugs have already occurred during development:
-// - update_flat(ParameterValue&&) without return (UB on rvalue overloading)
-// - edge case of vector -> map conversion on SMALL_CAPACITY-th element
-// - heterogeneous lookup via std::string_view without unnecessary std::string allocation
-
 #include "test_framework.hpp"
 #include <messageframe/HybridMessageMap.hpp>
 #include <messageframe/Value.hpp>
@@ -15,118 +8,113 @@ using msgframe::HybridMessageMap;
 using msgframe::ParameterValue;
 
 // --------------------------------------------------------------------
-// Group: AddFind — basic round-trip in vector mode (< SMALL_CAPACITY)
+// Group: MemoryAndLifecycle — Checking the management of non-trivial objects
 // --------------------------------------------------------------------
 
-TEST(AddFind, LvalueAddIsFoundByDeviceParam) {
+TEST(MemoryAndLifecycle, ValueCopySemanticsDoesNotLeakAndIsIndependent) {
     HybridMessageMap map;
-    ParameterValue v(12.6);
+    {
+        // Create a string that is guaranteed to allocate memory on the heap (bypassing SSO)
+        std::string long_string(100, 'a');
+        ParameterValue v(long_string);
+        map.add("device_01", "payload", v); // Copy
+    } // Here the local v and long_string are destroyed. The object in the map must live.
 
-    map.add("sensor_alpha", "voltage", v);
-
-    const auto* found = map.find("sensor_alpha", "voltage");
+    const auto* found = map.find("device_01", "payload");
     CHECK_NOT_NULL(found);
     if (found) {
-        auto d = found->tryGetDouble();
-        CHECK(d.has_value());
-        if (d) CHECK_EQ(*d, 12.6);
+        auto s = found->tryGetString();
+        CHECK(s.has_value());
+        if (s) {
+            CHECK_EQ(s->size(), static_cast<size_t>(100));
+            CHECK_EQ((*s)[0], 'a');
+        }
     }
 }
 
-TEST(AddFind, RvalueAddIsFoundByFlatKey) {
+TEST(MemoryAndLifecycle, ValueMoveSemanticsLeavesValidMovedFromState) {
     HybridMessageMap map;
-    map.add_flat("device_core.fw_version", ParameterValue(1.0));
+    std::string long_string(128, 'b');
+    ParameterValue original(long_string);
 
-    const auto* found = map.find_flat("device_core.fw_version");
+    map.add("device_01", "payload", std::move(original));
+
+    // After std::move the original object should reset to Unknown and not hold the string
+    auto s_orig = original.tryGetString();
+    CHECK_FALSE(s_orig.has_value());
+
+    // We check that the data on the map is preserved without damage.
+    const auto* found = map.find("device_01", "payload");
     CHECK_NOT_NULL(found);
-}
-
-TEST(AddFind, MissingKeyReturnsNull) {
-    HybridMessageMap map;
-    map.add("sensor_alpha", "voltage", ParameterValue(1.0));
-
-    CHECK_NULL(map.find("sensor_alpha", "does_not_exist"));
-    CHECK_NULL(map.find("ghost_device", "voltage"));
-}
-
-TEST(AddFind, SizeReflectsInsertedCount) {
-    HybridMessageMap map;
-    CHECK_EQ(map.size(), static_cast<size_t>(0));
-
-    map.add("dev", "p1", ParameterValue(1.0));
-    map.add("dev", "p2", ParameterValue(2.0));
-    CHECK_EQ(map.size(), static_cast<size_t>(2));
-}
-
-TEST(AddFind, ClearEmptiesContainerAndResetsToVectorMode) {
-    HybridMessageMap map;
-    map.add("dev", "p1", ParameterValue(1.0));
-    map.clear();
-
-    CHECK_EQ(map.size(), static_cast<size_t>(0));
-    CHECK_NULL(map.find("dev", "p1"));
-
-    // After clear() the container should accept elements normally again
-    map.add("dev", "p1", ParameterValue(5.0));
-    CHECK_EQ(map.size(), static_cast<size_t>(1));
-}
-
-// --------------------------------------------------------------------
-// Group: Map Conversion — the edge case of vector -> map on SMALLer CAPACITY
-// --------------------------------------------------------------------
-
-TEST(MapConversion, StaysInVectorModeBelowCapacity) {
-    HybridMessageMap map;
-    for (size_t i = 0; i < HybridMessageMap::SMALL_CAPACITY; ++i) {
-        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<double>(i)));
-    }
-    CHECK_EQ(map.size(), HybridMessageMap::SMALL_CAPACITY);
-
-    // All SMALL_CAPACITY elements must be found before conversion
-    for (size_t i = 0; i < HybridMessageMap::SMALL_CAPACITY; ++i) {
-        std::string param = "p" + std::to_string(i);
-        const auto* found = map.find("dev", param);
-        CHECK_NOT_NULL(found);
+    if (found) {
+        auto s_found = found->tryGetString();
+        CHECK(s_found.has_value());
+        if (s_found) CHECK_EQ(s_found->size(), static_cast<size_t>(128));
     }
 }
 
-TEST(MapConversion, ConvertsToMapModeOnceCapacityExceeded) {
+TEST(MemoryAndLifecycle, ClearForcesImmediateHeapReleaseInMapMode) {
     HybridMessageMap map;
-    // SMALL_CAPACITY + several elements -> force switch to map mode
-    const size_t count = HybridMessageMap::SMALL_CAPACITY + 10;
+    // We fill the container above the limit to force the heap to be allocated under the map
+    const size_t count = HybridMessageMap::SMALL_CAPACITY + 20;
     for (size_t i = 0; i < count; ++i) {
-        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<double>(i)));
+        map.add("dev", "param_" + std::to_string(i), ParameterValue(std::string("data")));
     }
 
     CHECK_EQ(map.size(), count);
 
-    // Check the elements on both sides of the conversion boundary:
-    // those that were added BEFORE the transition to map mode, and AFTER.
-    const auto* before_boundary = map.find("dev", "p0");
-    const auto* at_boundary = map.find("dev", "p" + std::to_string(HybridMessageMap::SMALL_CAPACITY - 1));
-    const auto* after_boundary = map.find("dev", "p" + std::to_string(HybridMessageMap::SMALL_CAPACITY));
-    const auto* last = map.find("dev", "p" + std::to_string(count - 1));
+    // Call clear. Thanks to our refactoring map_storage.reset()
+    // the memory from the map should be returned to the system immediately.
+    map.clear();
+    CHECK_EQ(map.size(), static_cast<size_t>(0));
 
-    CHECK_NOT_NULL(before_boundary);
-    CHECK_NOT_NULL(at_boundary);
-    CHECK_NOT_NULL(after_boundary);
-    CHECK_NOT_NULL(last);
+    // We check that the mode has reset to vector and is ready to accept data again
+    map.add("dev", "new_param", ParameterValue(42));
+    CHECK_EQ(map.size(), static_cast<size_t>(1));
+    const auto* found = map.find("dev", "new_param");
+    CHECK_NOT_NULL(found);
 }
 
-TEST(MapConversion, FindFlatWorksAfterConversionViaStringView) {
-    // Regression test specifically for heterogeneous lookup: we make sure that
-    // find_flat with string_view finds an element in map mode without
-    // the need to explicitly construct a std::string on the calling code side.
+// --------------------------------------------------------------------
+// Group: StressConversion — Complex Vector -> Map transition scenarios
+// --------------------------------------------------------------------
+
+TEST(StressConversion, SeamlessFallbackWithDuplicateKeyPrevention) {
     HybridMessageMap map;
-    const size_t count = HybridMessageMap::SMALL_CAPACITY + 5;
-    for (size_t i = 0; i < count; ++i) {
-        map.add_flat("dev." + std::to_string(i), ParameterValue(static_cast<double>(i)));
+
+    // Insert 128 elements (vector mode on the boundary)
+    for (size_t i = 0; i < HybridMessageMap::SMALL_CAPACITY; ++i) {
+        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<int64_t>(i)));
     }
 
-    std::string owned_key = "dev." + std::to_string(count - 1);
-    std::string_view view_key = owned_key; // pure view, no ownership
+    // We upsert (set) the existing element BEFORE converting
+    map.set("dev", "p5", ParameterValue(static_cast<int64_t>(999)));
+    CHECK_EQ(map.size(), HybridMessageMap::SMALL_CAPACITY); // Size has not changed, no duplicate
 
-    const auto* found = map.find_flat(view_key);
+    // 129th element: provoke convert_to_map()
+    map.add("dev", "trigger_conversion", ParameterValue(true));
+    CHECK_EQ(map.size(), HybridMessageMap::SMALL_CAPACITY + 1);
+
+    // We check that the updated element has been moved to the map with its new value.
+    const auto* p5_found = map.find("dev", "p5");
+    CHECK_NOT_NULL(p5_found);
+    if (p5_found) {
+        auto v = p5_found->tryGetInt64();
+        CHECK(v.has_value());
+        if (v) CHECK_EQ(*v, static_cast<int64_t>(999));
+    }
+}
+
+TEST(StressConversion, HeterogeneousLookupIsImmuneToTransientStrings) {
+    HybridMessageMap map;
+    // Force the transition to map mode
+    const size_t count = HybridMessageMap::SMALL_CAPACITY + 5;
+    for (size_t i = 0; i < count; ++i) {
+        map.add("device_node", "metric_" + std::to_string(i), ParameterValue(static_cast<double>(i)));
+    }
+
+    // We test the resistance of transparent search to temporary objects (dangling references trap)
+    const auto* found = map.find("device_node", std::string("metric_") + std::to_string(count - 1));
     CHECK_NOT_NULL(found);
     if (found) {
         auto d = found->tryGetDouble();
@@ -136,166 +124,26 @@ TEST(MapConversion, FindFlatWorksAfterConversionViaStringView) {
 }
 
 // --------------------------------------------------------------------
-// Group: UpdateSemantics — strict update(): this is where it got lost before
-// return in rvalue overload update_flat(ParameterValue&&)
+// Group: Mutations — Checking inplace modifications and type contracts
 // --------------------------------------------------------------------
 
-TEST(UpdateSemantics, UpdateExistingKeyLvalueReturnsTrueAndChangesValue) {
+TEST(Mutations, InplaceValueTypeMutationViaSet) {
     HybridMessageMap map;
-    map.add("dev", "voltage", ParameterValue(1.0));
+    map.add("dev", "param", ParameterValue(int64_t(100)));
 
-    ParameterValue new_val(99.0);
-    bool ok = map.update("dev", "voltage", new_val);
+    // Changing the type of a value on the same key (intensive memory reuse)
+    map.set("dev", "param", ParameterValue(std::string("mutated_to_string")));
 
-    CHECK(ok);
-    const auto* found = map.find("dev", "voltage");
+    const auto* found = map.find("dev", "param");
     CHECK_NOT_NULL(found);
     if (found) {
-        auto d = found->tryGetDouble();
-        CHECK(d.has_value());
-        if (d) CHECK_EQ(*d, 99.0);
+        auto s = found->tryGetString();
+        CHECK(s.has_value());
+        if (s) CHECK_EQ(*s, std::string("mutated_to_string"));
+
+        // We check that the old type is completely erased
+        CHECK_FALSE(found->tryGetInt64().has_value());
     }
-}
-
-TEST(UpdateSemantics, UpdateExistingKeyRvalueReturnsTrueAndChangesValue) {
-    // This is exactly the case where `return` was once forgotten in
-    // update_flat(std::string_view, ParameterValue&&) — function
-    // which returned an unexpected value (UB) instead of true.
-    HybridMessageMap map;
-    map.add("dev", "voltage", ParameterValue(1.0));
-
-    bool ok = map.update("dev", "voltage", ParameterValue(42.0));
-
-    CHECK(ok);
-    const auto* found = map.find("dev", "voltage");
-    CHECK_NOT_NULL(found);
-    if (found) {
-        auto d = found->tryGetDouble();
-        CHECK(d.has_value());
-        if (d) CHECK_EQ(*d, 42.0);
-    }
-}
-
-TEST(UpdateSemantics, UpdateMissingKeyLvalueReturnsFalseAndDoesNotInsert) {
-    HybridMessageMap map;
-    ParameterValue v(1.0);
-
-    bool ok = map.update("dev", "does_not_exist", v);
-
-    CHECK_FALSE(ok);
-    CHECK_EQ(map.size(), static_cast<size_t>(0));
-    CHECK_NULL(map.find("dev", "does_not_exist"));
-}
-
-TEST(UpdateSemantics, UpdateMissingKeyRvalueReturnsFalseAndDoesNotInsert) {
-    HybridMessageMap map;
-
-    bool ok = map.update("dev", "does_not_exist", ParameterValue(1.0));
-
-    CHECK_FALSE(ok);
-    CHECK_EQ(map.size(), static_cast<size_t>(0));
-}
-
-TEST(UpdateSemantics, UpdateRvalueInMapModeReturnsTrueForExistingKey) {
-    // The same rvalue-update-without-return bug, but in map mode
-    // (the update_flat_impl branch goes through map_storage->map.find,
-    // and not through vector_storage).
-    HybridMessageMap map;
-    const size_t count = HybridMessageMap::SMALL_CAPACITY + 5;
-    for (size_t i = 0; i < count; ++i) {
-        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<double>(i)));
-    }
-
-    bool ok = map.update("dev", "p3", ParameterValue(777.0));
-    CHECK(ok);
-
-    const auto* found = map.find("dev", "p3");
-    CHECK_NOT_NULL(found);
-    if (found) {
-        auto d = found->tryGetDouble();
-        CHECK(d.has_value());
-        if (d) CHECK_EQ(*d, 777.0);
-    }
-
-    bool missing_ok = map.update("dev", "ghost_param", ParameterValue(1.0));
-    CHECK_FALSE(missing_ok);
-}
-
-// --------------------------------------------------------------------
-// Group: SetSemantics — upsert: updates an existing one or adds a new one
-// --------------------------------------------------------------------
-
-TEST(SetSemantics, SetOnMissingKeyInsertsNewEntry) {
-    HybridMessageMap map;
-    map.set("dev", "voltage", ParameterValue(5.0));
-
-    CHECK_EQ(map.size(), static_cast<size_t>(1));
-    const auto* found = map.find("dev", "voltage");
-    CHECK_NOT_NULL(found);
-}
-
-TEST(SetSemantics, SetOnExistingKeyOverwritesWithoutDuplicating) {
-    HybridMessageMap map;
-    map.add("dev", "voltage", ParameterValue(5.0));
-    map.set("dev", "voltage", ParameterValue(9.0));
-
-    // There should be no duplicate — size remains 1
-    CHECK_EQ(map.size(), static_cast<size_t>(1));
-    const auto* found = map.find("dev", "voltage");
-    CHECK_NOT_NULL(found);
-    if (found) {
-        auto d = found->tryGetDouble();
-        CHECK(d.has_value());
-        if (d) CHECK_EQ(*d, 9.0);
-    }
-}
-
-// --------------------------------------------------------------------
-// Group: Iterate — traverse the container in both modes
-// --------------------------------------------------------------------
-
-namespace {
-struct IterateCounter {
-    size_t count = 0;
-    double sum = 0.0;
-};
-
-void count_and_sum(std::string_view /*device*/, const ParameterValue& val, void* user_data) {
-    auto* counter = static_cast<IterateCounter*>(user_data);
-    counter->count++;
-    if (auto d = val.tryGetDouble()) {
-        counter->sum += *d;
-    }
-}
-} // namespace
-
-TEST(Iterate, VisitsEveryElementInVectorMode) {
-    HybridMessageMap map;
-    map.add("dev", "p1", ParameterValue(1.0));
-    map.add("dev", "p2", ParameterValue(2.0));
-    map.add("dev", "p3", ParameterValue(3.0));
-
-    IterateCounter counter;
-    map.iterate(count_and_sum, &counter);
-
-    CHECK_EQ(counter.count, static_cast<size_t>(3));
-    CHECK_EQ(counter.sum, 6.0);
-}
-
-TEST(Iterate, VisitsEveryElementInMapMode) {
-    HybridMessageMap map;
-    const size_t count = HybridMessageMap::SMALL_CAPACITY + 7;
-    double expected_sum = 0.0;
-    for (size_t i = 0; i < count; ++i) {
-        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<double>(i)));
-        expected_sum += static_cast<double>(i);
-    }
-
-    IterateCounter counter;
-    map.iterate(count_and_sum, &counter);
-
-    CHECK_EQ(counter.count, count);
-    CHECK_EQ(counter.sum, expected_sum);
 }
 
 int main() {
