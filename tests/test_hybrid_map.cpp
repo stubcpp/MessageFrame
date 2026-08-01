@@ -68,7 +68,7 @@ TEST(MemoryAndLifecycle, ClearForcesImmediateHeapReleaseInMapMode) {
     CHECK_EQ(map.size(), static_cast<size_t>(0));
 
     // We check that the mode has reset to vector and is ready to accept data again
-    map.add("dev", "new_param", ParameterValue(42));
+    map.add("dev", "new_param", ParameterValue(42LL));
     CHECK_EQ(map.size(), static_cast<size_t>(1));
 }
 
@@ -96,7 +96,7 @@ TEST(StressConversion, SeamlessFallbackWithDuplicateKeyPrevention) {
     const auto* p5_found = map.find("dev", "p5");
     CHECK_NOT_NULL(p5_found);
     if (p5_found) {
-        auto v = p5_found->tryGetInt64();
+        auto v = p5_found->tryGetInt();
         CHECK(v.has_value());
         if (v) CHECK_EQ(*v, static_cast<int64_t>(999));
     }
