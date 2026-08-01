@@ -26,9 +26,9 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4.2.2
       with:
-        submodules: recursive # Automatically pulls up robin_map and msgpack
+        submodules: recursive
 
     - name: Set up Build Environment
       run: |
@@ -44,7 +44,7 @@ jobs:
           -DMSGFRAME_BUILD_BENCHMARKS=ON
 
     - name: Build Libraries and Binaries
-      run: cmake --build build --config Release --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+      run: cmake --build build --config Release --parallel 4
 
     - name: Run Unit Tests
       run: |
