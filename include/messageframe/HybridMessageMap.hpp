@@ -111,7 +111,7 @@ namespace msgframe {
                                            std::string_view l_view(pair.first.full_key);
                                            if (l_view.size() != device.size() + 1 + param.size()) return false;
                                            if (l_view.compare(0, device.size(), device) != 0) return false;
-                                           if (l_view[device.size()] != '.') return false;
+                                           if (l_view[device.size()] != '\x1F') return false;
                                            return l_view.substr(device.size() + 1) == param;
                                        });
                 if (it != vector_storage.end()) {
@@ -159,7 +159,7 @@ namespace msgframe {
                                            std::string_view l_view(pair.first.full_key);
                                            if (l_view.size() != device.size() + 1 + param.size()) return false;
                                            if (l_view.compare(0, device.size(), device) != 0) return false;
-                                           if (l_view[device.size()] != '.') return false;
+                                           if (l_view[device.size()] != '\x1F') return false;
                                            return l_view.substr(device.size() + 1) == param;
                                        });
                 if (it != vector_storage.end()) {
