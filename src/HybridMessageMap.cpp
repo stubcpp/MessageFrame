@@ -200,11 +200,9 @@ namespace msgframe {
         map_storage->map.reserve(SMALL_CAPACITY);
 		
 		// Move data from vector to map without copying values
-		for (auto& pair : vector_storage) {
-            // std::move(pair.first) takes memory allocated for strings inside ParameterKey without reallocations
-            map_storage->map.emplace(std::move(pair.first), std::move(pair.second));
-
-		}
+        for (size_t i = 0; i < vector_storage.size(); ++i) {
+            map_storage->map.emplace(std::move(vector_storage[i].first), std::move(vector_storage[i].second));
+        }
 
         vector_storage.clear();
         vector_storage.shrink_to_fit();
