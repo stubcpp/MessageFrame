@@ -507,14 +507,11 @@ instead of silently creating it.
  
 ### 🧠 Zero-Allocation Lookups via Heterogeneous Maps
 
-When `HybridMessageMap` crosses the `SMALL_CAPACITY = 128` boundary and falls 
-back to its hash-map mode (`tsl::robin_map`), it utilizes customized transparent 
-hash predicates (`ParameterKeyHash` and `ParameterKeyEqual`).
+When `HybridMessageMap` crosses the `SMALL_CAPACITY = 128` boundary and falls back to its hash-map mode (`tsl::robin_map`), it utilizes transparent hash predicates (`ParameterKeyHash` and `ParameterKeyEqual`). 
 
-This enables **Heterogeneous Lookup**, meaning that calling `msg.find("device_id", 
-"parameter_name")` queries the map using pure `std::string_view` structures. 
-The hash table completely bypasses temporal string constructions and runs with 
-**strictly zero allocations on the heap**, offering O(1) runtime lookups without sacrificing speed or memory.
+Unlike naive transparent implementations that accept runtime `std::pair` wrappers—which risk dangerous dangling references during cascaded map routing—**MessageFrame** resolves queries against a single flat string layout. Calling `msg.find("device_id", "parameter_name")` internally concatenates the two keys directly into a temporary `std::string` buffer. 
+
+Thanks to **Small String Optimization (SSO)**, this combined key resides entirely on the CPU stack with **strictly zero allocations on the heap**. The hash table is then safely queried using a pure `std::string_view`, offering blazing-fast, cache-friendly $O(1)$ runtime lookups while remaining completely isolated from memory fragmentation or dangling pointer traps.
 
 ### 🏷 Key Naming & Small String Optimization (SSO)
 
@@ -524,6 +521,7 @@ Keeping combined lengths under ~15–23 bytes ensures that keys are managed stat
 keeping your application flow detached from runtime heap fragmentation.
 
 ### **Methods with the `_flat` suffix** (`add_flat()`, `set_flat()`, `update_flat()`) 
+
 are still provided for cases where you receive or store keys as an already combined 
 `"device.parameter"` buffer (e.g., loaded directly from a configuration file or network packet). 
 You no longer need to synthetically use `add_flat()` just to save runtime overhead—the regular 
@@ -531,9 +529,9 @@ You no longer need to synthetically use `add_flat()` just to save runtime overhe
 
 ### What does clear() do
 
-The `clear()` method is not used to prevent memory leaks — the destructor will clean everything up 
-once the object goes out of scope. Its main purpose is to allow **reusing the same MessageFrame** 
-for multiple consecutive messages without creating a new object each time.
+The `clear()` method completely frees the memory allocated for the hash map in the heap, 
+returning it to the operating system, which guarantees a stable RAM footprint during long-term service operation.
+Its main purpose is to allow **reusing the same MessageFrame** for multiple consecutive messages without creating a new object each time.
 
 If you create a MessageFrame once outside the loop and then fill it in each iteration, 
 you must call `clear()` after every send. Otherwise, new parameters will simply be appended 
