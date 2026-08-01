@@ -79,11 +79,11 @@ namespace msgframe {
         Type type{Type::Unknown};
         
         // Using a raw buffer aligned to the size of std::string.
-        union ValueUnion {
+        union alignas(std::string) ValueUnion {
             int64_t intValue;
             double doubleValue;
             bool boolValue;
-            alignas(std::string) char stringBuffer[sizeof(std::string)];
+            char stringBuffer[sizeof(std::string)];
         } value;
     };
 
