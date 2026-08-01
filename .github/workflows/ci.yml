@@ -43,8 +43,9 @@ jobs:
           -DMSGFRAME_BUILD_TESTS=ON \
           -DMSGFRAME_BUILD_BENCHMARKS=ON
 
-    - name: Build Everything
-      run: cmake --build build --config Release --parallel 4
+    - name: Build Everything (Verbose Log)
+      # Додали VERBOSE=1, щоб Clang виплюнув у термінл точний текст помилки
+      run: cmake --build build --config Release --parallel 4 -- VERBOSE=1
 
     - name: Run Unit Tests
       run: |
