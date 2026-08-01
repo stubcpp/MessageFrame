@@ -180,9 +180,7 @@ namespace msgframe {
 
     void HybridMessageMap::clear() noexcept {
         vector_storage.clear();
-        if (map_storage) {
-            map_storage->map.clear();
-        }
+        map_storage.reset();
         is_vector_mode = true;
     }
 

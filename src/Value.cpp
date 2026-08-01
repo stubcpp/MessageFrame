@@ -194,7 +194,7 @@ namespace msgframe {
 
             // Construct std::string in place DIRECTLY from string_view.
             // Now ONE copy/SSO happens, and no temporary string is created at all!
-            ::new (&value.stringBuffer) std::string(sv);
+            ::new (value.stringBuffer) std::string(sv);
             break;
         }
         default:
