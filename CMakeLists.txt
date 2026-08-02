@@ -116,21 +116,32 @@ option(MSGFRAME_BUILD_TESTS "Build messageframe unit tests" ON)
 
 if(MSGFRAME_BUILD_TESTS)
     enable_testing()
-
-    add_executable(messageframe_tests tests/test_hybrid_map.cpp tests/test_message_frame.cpp)
-    target_link_libraries(messageframe_tests PRIVATE msg_frame)
+ 
     # tests/test_framework.hpp is located next to the .cpp itself —
     # no additional include_directories are needed, because #include "test_framework.hpp"
     # resolves relative to the directory of the file that includes it.
-
-    # Add dependencies only to tests:
-    target_include_directories(messageframe_tests PRIVATE
+	
+    # One executable per test file — keeps ctest results isolated so CI
+    # points at the exact failing module instead of a single combined blob.
+    add_executable(test_hybrid_map tests/test_hybrid_map.cpp)
+    target_link_libraries(test_hybrid_map PRIVATE msg_frame)
+	# Add dependencies only to tests:
+    target_include_directories(test_hybrid_map PRIVATE
         ${ROBIN_MAP_INCLUDE_DIR}
         ${MSGPACK_INCLUDE_DIR}
     )
-
-    add_test(NAME HybridMessageMapTests COMMAND messageframe_tests)
+    add_test(NAME HybridMessageMapTests COMMAND test_hybrid_map)
+ 
+    add_executable(test_message_frame tests/test_message_frame.cpp)
+    target_link_libraries(test_message_frame PRIVATE msg_frame)
+	# Add dependencies only to tests:
+    target_include_directories(test_message_frame PRIVATE
+        ${ROBIN_MAP_INCLUDE_DIR}
+        ${MSGPACK_INCLUDE_DIR}
+    )
+    add_test(NAME MessageFrameTests COMMAND test_message_frame)
 endif()
+
 
 # ------------------------------------------------------------------
 # INSTALL (commented out)

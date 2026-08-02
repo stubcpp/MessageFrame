@@ -83,8 +83,6 @@ TEST(Serialization, MalformedBinaryBufferReturnsFalseGracefully) {
     CHECK_FALSE(result);
 }
 
-/*
 int main() {
     return msgframe_test::run_all();
 }
-*/
