@@ -72,19 +72,19 @@ class MessageFrame {
         }
 
         /**
-        * @brief Adds a new parameter when the key is already combined ("device.parameter")
+        * @brief Adds a new parameter using a pre-composed FlatKey
         *        without checking for duplicates (Maximum speed).
         * @note Complexity: O(1) in vector mode (proxy to HybridMessageMap::add_flat).
         * @warning If the key already exists, in Release build a duplicate will be created
         *          (find_flat() will return the first). In Debug build an assert will trigger.
         *          Use set_flat() for "insert or update" logic.
-        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param flat_key Key produced by FlatKey::compose(device, param)
         * @param val      Parameter value
         */
-        void add_flat(std::string_view flat_key, const ParameterValue& val) {
+        void add_flat(const FlatKey& flat_key, const ParameterValue& val) {
             parameters.add_flat(flat_key, val);
         }
-        void add_flat(std::string_view flat_key, ParameterValue&& val) {
+        void add_flat(const FlatKey& flat_key, ParameterValue&& val) {
             parameters.add_flat(flat_key, std::move(val));
         }
 
@@ -105,16 +105,16 @@ class MessageFrame {
 
         /**
         * @brief Upsert semantics: Updates the value if the key already exists, or adds a new one
-        *        (combined key "device.param").
+        *        (pre-composed FlatKey).
         * @note Complexity: in vector mode O(N) (linear duplicate search), in map mode O(1)
         *       (proxy to HybridMessageMap::set_flat).
-        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param flat_key Key produced by FlatKey::compose(device, param)
         * @param val      New value to insert or update
         */
-        void set_flat(std::string_view flat_key, const ParameterValue& val) {
+        void set_flat(const FlatKey& flat_key, const ParameterValue& val) {
             parameters.set_flat(flat_key, val);
         }
-        void set_flat(std::string_view flat_key, ParameterValue&& val) {
+        void set_flat(const FlatKey& flat_key, ParameterValue&& val) {
             parameters.set_flat(flat_key, std::move(val));
         }
 
@@ -136,17 +136,17 @@ class MessageFrame {
 
         /**
         * @brief Strict update: Modifies the value ONLY if the key already exists in the container
-        *        (combined key "device.param").
+        *        (pre-composed FlatKey).
         * @note This method never increases the number of parameters and never creates new entries
         *       (proxy to HybridMessageMap::update_flat).
-        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param flat_key Key produced by FlatKey::compose(device, param)
         * @param val      New value for the existing parameter
         * @return true — value successfully updated; false — such key not found (structure unchanged).
         */
-        bool update_flat(std::string_view flat_key, const ParameterValue& val) {
+        bool update_flat(const FlatKey& flat_key, const ParameterValue& val) {
             return parameters.update_flat(flat_key, val);
         }
-        bool update_flat(std::string_view flat_key, ParameterValue&& val) {
+        bool update_flat(const FlatKey& flat_key, ParameterValue&& val) {
             return parameters.update_flat(flat_key, std::move(val));
         }
 
@@ -162,13 +162,13 @@ class MessageFrame {
         }
 
         /**
-        * @brief Finds a parameter by its combined key ("device.param") without creating
+        * @brief Finds a parameter by a pre-composed FlatKey without creating
         *        a temporary std::string (Zero-Allocation find).
         * @note Complexity: O(N) in vector mode (linear comparison), O(1) in map mode.
-        * @param flat_key Combined key (e.g., "device.parameter")
+        * @param flat_key Key produced by FlatKey::compose(device, param)
         * @return Pointer to the found value, or nullptr if the key is not found.
         */
-        const ParameterValue* find_flat(std::string_view flat_key) const noexcept {
+        const ParameterValue* find_flat(const FlatKey& flat_key) const noexcept {
             return parameters.find_flat(flat_key);
         }
 

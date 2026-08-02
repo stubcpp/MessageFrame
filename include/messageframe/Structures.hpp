@@ -69,6 +69,40 @@ namespace msgframe {
         }
     };
 
+    // A pre-composed, type-safe key for the *_flat() fast-path methods
+    // (add_flat / set_flat / update_flat / find_flat).
+    //
+    // The ONLY way to obtain a FlatKey is FlatKey::compose(device, param),
+    // which inserts the library's real separator ('\x1F', ASCII Unit
+    // Separator — NOT a literal dot, despite what "device.parameter" in
+    // older docs/examples might suggest). This makes it impossible to
+    // accidentally pass a raw string with the wrong separator (e.g. a
+    // literal ".") or no separator at all — both previously caused
+    // add_flat() to silently store the entry under an empty device,
+    // with no error and no way to find it again via the original string.
+    //
+    // Intended use: compose() once outside a hot loop, then reuse the
+    // same FlatKey across many repeated add_flat()/find_flat() calls on
+    // the same device+parameter pair (e.g. polling "sdr1"+"frequency"
+    // every sample) to skip the per-call key concatenation.
+    class FlatKey {
+    public:
+        static FlatKey compose(std::string_view device, std::string_view param) {
+            std::string key;
+            key.reserve(device.size() + 1 + param.size());
+            key.append(device).append(1, kSeparator).append(param);
+            return FlatKey(std::move(key));
+        }
+
+        std::string_view view() const noexcept { return key_; }
+
+    private:
+        explicit FlatKey(std::string key) : key_(std::move(key)) {}
+        std::string key_;
+
+        static constexpr char kSeparator = '\x1F';
+    };
+
 	// Large raw binary data (IQ-ether, files)
 	struct Attachment {
 		std::string name;

@@ -140,6 +140,15 @@ if(MSGFRAME_BUILD_TESTS)
         ${MSGPACK_INCLUDE_DIR}
     )
     add_test(NAME MessageFrameTests COMMAND test_message_frame)
+	
+	add_executable(test_flat_key tests/test_flat_key.cpp)
+    target_link_libraries(test_flat_key PRIVATE msg_frame)
+	# Add dependencies only to tests:
+    target_include_directories(test_flat_key PRIVATE
+        ${ROBIN_MAP_INCLUDE_DIR}
+        ${MSGPACK_INCLUDE_DIR}
+    )
+    add_test(NAME FlatKeyTests COMMAND test_flat_key)
 endif()
 
 

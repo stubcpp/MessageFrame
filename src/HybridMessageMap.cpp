@@ -77,22 +77,39 @@ namespace msgframe {
         add_impl(device, param, std::move(val));
     }
 
-    void HybridMessageMap::add_flat(std::string_view flat_key, const ParameterValue& val) {
-        size_t dot_pos = flat_key.find('\x1F');
-        if (dot_pos == std::string_view::npos) {
-            add_impl("", flat_key, val);
-        } else {
-            add_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), val);
+    void HybridMessageMap::add_flat(const FlatKey& flat_key, const ParameterValue& val) {
+#ifndef NDEBUG
+        if (find_flat(flat_key) != nullptr) {
+            assert(false && "HybridMessageMap::add_flat() called with duplicate key — use set_flat() for upsert semantics");
         }
+#endif
+        if (is_vector_mode) {
+            if (vector_storage.size() >= SMALL_CAPACITY) {
+                convert_to_map();
+            } else {
+                // FlatKey is already composed — no split, no re-concatenation.
+                vector_storage.emplace_back(ParameterKey{std::string(flat_key.view())}, val);
+                return;
+            }
+        }
+        map_storage->map.emplace(ParameterKey{std::string(flat_key.view())}, val);
     }
 
-    void HybridMessageMap::add_flat(std::string_view flat_key, ParameterValue&& val) {
-        size_t dot_pos = flat_key.find('\x1F');
-        if (dot_pos == std::string_view::npos) {
-            add_impl("", flat_key, std::move(val));
-        } else {
-            add_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), std::move(val));
+    void HybridMessageMap::add_flat(const FlatKey& flat_key, ParameterValue&& val) {
+#ifndef NDEBUG
+        if (find_flat(flat_key) != nullptr) {
+            assert(false && "HybridMessageMap::add_flat() called with duplicate key — use set_flat() for upsert semantics");
         }
+#endif
+        if (is_vector_mode) {
+            if (vector_storage.size() >= SMALL_CAPACITY) {
+                convert_to_map();
+            } else {
+                vector_storage.emplace_back(ParameterKey{std::string(flat_key.view())}, std::move(val));
+                return;
+            }
+        }
+        map_storage->map.emplace(ParameterKey{std::string(flat_key.view())}, std::move(val));
     }
 
     void HybridMessageMap::set(std::string_view device, std::string_view param, const ParameterValue& val) {
@@ -103,22 +120,22 @@ namespace msgframe {
         set_impl(device, param, std::move(val));
     }
 
-    void HybridMessageMap::set_flat(std::string_view flat_key, const ParameterValue& val) {
-        size_t dot_pos = flat_key.find('\x1F');
-        if (dot_pos == std::string_view::npos) {
-            set_impl("", flat_key, val);
-        } else {
-            set_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), val);
+    void HybridMessageMap::set_flat(const FlatKey& flat_key, const ParameterValue& val) {
+        const ParameterValue* existing = find_flat(flat_key);
+        if (existing != nullptr) {
+            *const_cast<ParameterValue*>(existing) = val;
+            return;
         }
+        add_flat(flat_key, val);
     }
     
-    void HybridMessageMap::set_flat(std::string_view flat_key, ParameterValue&& val) {
-        size_t dot_pos = flat_key.find('\x1F');
-        if (dot_pos == std::string_view::npos) {
-            set_impl("", flat_key, std::move(val));
-        } else {
-            set_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), std::move(val));
+    void HybridMessageMap::set_flat(const FlatKey& flat_key, ParameterValue&& val) {
+        const ParameterValue* existing = find_flat(flat_key);
+        if (existing != nullptr) {
+            *const_cast<ParameterValue*>(existing) = std::move(val);
+            return;
         }
+        add_flat(flat_key, std::move(val));
     }
 
     bool HybridMessageMap::update(std::string_view device, std::string_view param, const ParameterValue& val) {
@@ -129,22 +146,22 @@ namespace msgframe {
         return update_impl(device, param, std::move(val));
     }
 
-    bool HybridMessageMap::update_flat(std::string_view flat_key, const ParameterValue& val) {
-        size_t dot_pos = flat_key.find('\x1F');
-        if (dot_pos == std::string_view::npos) {
-            return update_impl("", flat_key, val);
-        } else {
-            return update_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), val);
+    bool HybridMessageMap::update_flat(const FlatKey& flat_key, const ParameterValue& val) {
+        const ParameterValue* existing = find_flat(flat_key);
+        if (existing != nullptr) {
+            *const_cast<ParameterValue*>(existing) = val;
+            return true;
         }
+        return false;
     }
-
-    bool HybridMessageMap::update_flat(std::string_view flat_key, ParameterValue&& val) {
-        size_t dot_pos = flat_key.find('\x1F');
-        if (dot_pos == std::string_view::npos) {
-            return update_impl("", flat_key, std::move(val));
-        } else {
-            return update_impl(flat_key.substr(0, dot_pos), flat_key.substr(dot_pos + 1), std::move(val));
+    
+    bool HybridMessageMap::update_flat(const FlatKey& flat_key, ParameterValue&& val) {
+        const ParameterValue* existing = find_flat(flat_key);
+        if (existing != nullptr) {
+            *const_cast<ParameterValue*>(existing) = std::move(val);
+            return true;
         }
+        return false;
     }
     
     const ParameterValue* HybridMessageMap::find(std::string_view device, std::string_view param) const noexcept {
@@ -175,13 +192,14 @@ namespace msgframe {
         }
     }  
 
-    const ParameterValue* HybridMessageMap::find_flat(std::string_view flat_key) const noexcept {
+    const ParameterValue* HybridMessageMap::find_flat(const FlatKey& flat_key) const noexcept {
+        std::string_view key_view = flat_key.view();
         if (is_vector_mode) {
             auto it = std::find_if(vector_storage.begin(), vector_storage.end(),
-                                   [flat_key](const auto& pair) { return pair.first.full_key == flat_key; });
+                                   [key_view](const auto& pair) { return pair.first.full_key == key_view; });
             return (it != vector_storage.end()) ? &(it->second) : nullptr;
         } else {
-            auto it = map_storage->map.find(flat_key);
+            auto it = map_storage->map.find(key_view);
             return (it != map_storage->map.end()) ? &(it->second) : nullptr;
         }
     }

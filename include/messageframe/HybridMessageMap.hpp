@@ -77,19 +77,19 @@ namespace msgframe {
             }
         }
 		
-        // Adding parameters if the key is already combined ("device.parameter")
+        // Adding parameters using a pre-composed, type-safe key
         /**
-        * @brief Adds a new parameter when the key is already combined ("device.parameter")
+        * @brief Adds a new parameter using a pre-composed FlatKey
         *        without checking for duplicates (Maximum speed).
         * @note Complexity: O(1). In vector mode it performs a pure push_back.
         * @warning If the key already exists, in Release build a duplicate will be created
         *          (find() will return the first). In Debug build an assert will trigger.
-        *          Use set() for "insert or update" logic.
-        * @param flat_key Combined key (e.g., "device.parameter")
+        *          Use set_flat() for "insert or update" logic.
+        * @param flat_key Key produced by FlatKey::compose(device, param)
         * @param val      Parameter value
         */
-		void add_flat(std::string_view flat_key, const ParameterValue& val);
-        void add_flat(std::string_view flat_key, ParameterValue&& val);
+		void add_flat(const FlatKey& flat_key, const ParameterValue& val);
+        void add_flat(const FlatKey& flat_key, ParameterValue&& val);
 
         // Upsert: updates the value if the key exists; otherwise adds a new one
         // (slower than add() — linear search in vector mode)
@@ -128,17 +128,17 @@ namespace msgframe {
             add_impl(device, param, std::forward<T>(val));
         }
 
-        // Upsert: updates the value for a combined key ("device.param") if the key exists;
-        // otherwise adds a new one (slower than add() — linear search in vector mode)
+        // Upsert using a pre-composed, type-safe key; updates the value if the
+        // key exists, otherwise adds a new one (slower than add_flat() —
+        // linear search in vector mode)
         /**
         * @brief Upsert semantics: Updates the value if the key already exists, or adds a new one.
         * @note Complexity: in vector mode O(N) (linear duplicate search), in map mode O(1).
-        * @param device Name of the device / domain
-        * @param param  Name of the metric
-        * @param val    New value to insert or update
+        * @param flat_key Key produced by FlatKey::compose(device, param)
+        * @param val      New value to insert or update
         */
-        void set_flat(std::string_view flat_key, const ParameterValue& val);
-        void set_flat(std::string_view flat_key, ParameterValue&& val);
+        void set_flat(const FlatKey& flat_key, const ParameterValue& val);
+        void set_flat(const FlatKey& flat_key, ParameterValue&& val);
 
         // Strict update: updates only an existing key. Returns false if the key is not found (value remains unchanged)
         /**
@@ -176,22 +176,21 @@ namespace msgframe {
             return false;
         }
 
-        // Strict update: updates only an existing key (combined key "device.param").
-        // Returns false if the key is not found (value remains unchanged).
+        // Strict update using a pre-composed, type-safe key. Returns false if
+        // the key is not found (value remains unchanged).
         /**
         * @brief Strict update: Modifies the value ONLY if the key already exists in the container.
         * @note This method never increases the container size and never creates new entries.
-        * @param device Name of the device / domain
-        * @param param  Name of the metric
-        * @param val    New value for the existing parameter
+        * @param flat_key Key produced by FlatKey::compose(device, param)
+        * @param val      New value for the existing parameter
         * @return true — value successfully updated; false — such key not found (structure unchanged).
         */
-        bool update_flat(std::string_view flat_key, const ParameterValue& val);
-        bool update_flat(std::string_view flat_key, ParameterValue&& val);
+        bool update_flat(const FlatKey& flat_key, const ParameterValue& val);
+        bool update_flat(const FlatKey& flat_key, ParameterValue&& val);
                 		
 		// Finding parameters without generating temporary std::string
 		const ParameterValue* find(std::string_view device, std::string_view param) const noexcept;
-		const ParameterValue* find_flat(std::string_view flat_key) const noexcept;
+		const ParameterValue* find_flat(const FlatKey& flat_key) const noexcept;
 
         void clear() noexcept;
         size_t size() const noexcept;

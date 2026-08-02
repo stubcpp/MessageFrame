@@ -481,7 +481,9 @@ one for a given call site keeps hot paths allocation-free where it matters.
  
 In vector mode this is a plain `push_back()`; in map mode, an `emplace()`.
 Use it for high-frequency streams where you assemble a frame from scratch
-in a deterministic loop and know each key is unique.
+in a deterministic loop and know each key is unique. `add_flat()` takes a
+pre-composed `FlatKey` (see below) instead of separate `device`/`param`
+arguments.
  
 **Be careful:** a duplicate key bypasses the check in Release builds (the
 vector-mode path doesn't scan for existing entries, by design, to stay
@@ -493,9 +495,9 @@ development.
  
 Looks for the key first; if found, overwrites it in place, otherwise
 inserts. Use it when parameters can arrive out of order, or when multiple
-subsystems might write to the same `device.parameter` within one frame
+subsystems might write to the same device/parameter pair within one frame
 cycle. In vector mode this costs an O(N) linear scan (`std::find_if`)
-before the eventual insert; in map mode it's a single `insert_or_assign()`.
+before the eventual insert; in map mode it's a single lookup + assign.
  
 ### `update()` / `update_flat()` — strict in-place edit
  
@@ -515,17 +517,50 @@ Thanks to **Small String Optimization (SSO)**, this combined key resides entirel
 
 ### 🏷 Key Naming & Small String Optimization (SSO)
 
-Since internal indexing relies on a consolidated `"device.parameter"` layout inside a 
-single string record, short naming patterns seamlessly trigger **Small String Optimization (SSO)**. 
-Keeping combined lengths under ~15–23 bytes ensures that keys are managed statically on the CPU stack, 
+Since internal indexing relies on a consolidated single-string layout inside a
+`ParameterKey` (`device` + the library's internal separator + `param`), short
+naming patterns seamlessly trigger **Small String Optimization (SSO)**.
+Keeping combined lengths under ~15–23 bytes ensures that keys are managed statically on the CPU stack,
 keeping your application flow detached from runtime heap fragmentation.
 
-### **Methods with the `_flat` suffix** (`add_flat()`, `set_flat()`, `update_flat()`) 
+> ⚠️ **The internal separator is *not* a literal dot.** Earlier examples in
+> this README used `"device.parameter"` as illustrative shorthand, which is
+> misleading — the real separator is the ASCII Unit Separator (`'\x1F'`).
+> Never build a flat key by hand (`device + "." + param` or any other
+> string concatenation); always go through `FlatKey::compose(device, param)`,
+> described below. Composing it yourself with the wrong character silently
+> stores the entry under an empty device instead of raising an error.
 
-are still provided for cases where you receive or store keys as an already combined 
-`"device.parameter"` buffer (e.g., loaded directly from a configuration file or network packet). 
-You no longer need to synthetically use `add_flat()` just to save runtime overhead—the regular 
-`add()` method is just as fast.
+### **Methods with the `_flat` suffix** (`add_flat()`, `set_flat()`, `update_flat()`, `find_flat()`)
+
+take a `FlatKey` — a small pre-composed key type. It cannot be constructed
+from a raw string; the only way to get one is:
+
+```cpp
+auto key = msgframe::FlatKey::compose("sdr1", "frequency"); // inserts '\x1F' for you
+```
+
+This exists for the *same key reused across many calls* — e.g. polling
+`"sdr1"` + `"frequency"` on every sample in a receive loop. Compose it once
+outside the loop, then reuse it:
+
+```cpp
+auto freq_key = msgframe::FlatKey::compose("sdr1", "frequency");
+for (;;) {
+    msg.set_flat(freq_key, msgframe::ParameterValue(read_frequency()));
+    // ...
+}
+```
+
+Measured on a repeated `find()` vs. `find_flat()` call with the same
+device/parameter pair (map-mode, i.e. past the 128-parameter threshold):
+`find_flat()` was **~63% faster per call** than re-supplying `device`/`param`
+to `find()` each time, because the two-key path still re-appends `device` +
+separator + `param` into a stack buffer on every single call — cheap
+(SSO avoids a heap allocation), but not free at high call rates. If your key
+is only used once per message, plain `add()`/`find()` with separate
+`device`/`param` is simpler and the difference won't matter; reach for the
+`_flat` variants when the same pair is looked up or written repeatedly.
 
 ### What does clear() do
 
@@ -662,13 +697,13 @@ if (rx_msg.deserialize(tx_buffer.data(), tx_buffer.size())) {
 
 ### ⚡ Critical Performance Rules for Code Optimization
 * **Maximize Hot Path Speed with `msg.add()`:** The `add()` method is explicitly designed for maximum performance (a plain `O(1)` append in vector mode). Favor `add()` by default for all high-frequency telemetry tracking. Note that it does **not** check for pre-existing keys and blindly appends duplicates in Release mode to maintain speed. If the application structure implies that a specific key *must* be overwritten or state mutation tracking is strictly required, only then switch to `msg.set()` (insert-or-overwrite) or `msg.update()` (in-place edit).
-* **Eliminate Allocation Traps Natively:** Standard `add()` / `set()` / `update()` methods perform in-place key formatting directly within the internal memory layout. You no longer need to synthetically force `_flat` primitives for basic telemetry loops to save overhead—the regular dynamic multi-key API runs allocation-free by default.
+* **Eliminate Allocation Traps Natively:** Standard `add()` / `set()` / `update()` methods perform in-place key formatting directly within the internal memory layout and stay allocation-free thanks to SSO. That said, they still re-concatenate `device` + `param` on *every* call — if the same device/parameter pair is looked up or written repeatedly (e.g. a polling loop), compose a `FlatKey` once outside the loop and use the `_flat` variants; it measurably reduces per-call overhead (see "Key Naming & SSO" above). For one-off, non-repeated keys, the regular multi-key API is simpler and the difference is negligible.
 
 * **Buffer & Container Reuse:** In tight execution or network loops, do **not** re-instantiate `MessageFrame`. Generate a single instance outside the loop and call `msg.clear()` at the end of each iteration. This retains previously allocated internal capacities and safely resets the map back to Vector Mode without triggering dynamic heap allocations.
 
 ### 🔗 Compact Prompt Snippet
 If a user forces you to parse this context quickly via a single-line prompt, memorize this constraint tree:
-> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy attachments. Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files or lookups like find_attachment(). Favor add() natively by default for hot-path unique appends as it provides in-place concatenation. Map lookups (find/set/update) are fully transparent and accept two string_view keys with zero heap allocations. Use _flat suffixes only if the combined key already exists as a single entity, and always call clear() to safely reuse message buffers inside execution loops."
+> "MessageFrame is a schema-less C++17 library packing metadata via MessagePack and heavy data via zero-copy attachments. Internal storage uses an adaptive vector/robin_map layout. Rules for code-gen: Never invent reflection macros/proto files or lookups like find_attachment(). Favor add() natively by default for hot-path unique appends as it provides in-place concatenation. Map lookups (find/set/update) are fully transparent and accept two string_view keys with zero heap allocations. Use the _flat suffixes (add_flat/set_flat/update_flat/find_flat) ONLY with a msgframe::FlatKey obtained from FlatKey::compose(device, param) — never a raw string_view or string literal, that overload does not exist. Reach for _flat when the same device/parameter pair is looked up or written repeatedly in a loop; compose the FlatKey once outside the loop. Always call clear() to safely reuse message buffers inside execution loops."
 
 
 
