@@ -117,7 +117,7 @@ option(MSGFRAME_BUILD_TESTS "Build messageframe unit tests" ON)
 if(MSGFRAME_BUILD_TESTS)
     enable_testing()
 
-    add_executable(messageframe_tests tests/test_hybrid_map.cpp)
+    add_executable(messageframe_tests tests/test_hybrid_map.cpp tests/test_message_frame.cpp)
     target_link_libraries(messageframe_tests PRIVATE msg_frame)
     # tests/test_framework.hpp is located next to the .cpp itself —
     # no additional include_directories are needed, because #include "test_framework.hpp"
