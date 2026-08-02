@@ -149,6 +149,14 @@ if(MSGFRAME_BUILD_TESTS)
         ${MSGPACK_INCLUDE_DIR}
     )
     add_test(NAME FlatKeyTests COMMAND test_flat_key)
+
+    add_executable(test_messageframe_parameter_api tests/test_messageframe_parameter_api.cpp)
+    target_link_libraries(test_messageframe_parameter_api PRIVATE msg_frame)
+    target_include_directories(test_messageframe_parameter_api PRIVATE
+        ${ROBIN_MAP_INCLUDE_DIR}
+        ${MSGPACK_INCLUDE_DIR}
+    )
+    add_test(NAME MessageFrameParameterApiTests COMMAND test_messageframe_parameter_api)
 endif()
 
 
