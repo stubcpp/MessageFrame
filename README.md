@@ -562,6 +562,62 @@ is only used once per message, plain `add()`/`find()` with separate
 `device`/`param` is simpler and the difference won't matter; reach for the
 `_flat` variants when the same pair is looked up or written repeatedly.
 
+**Real-world pattern:** store the `FlatKey` as a member of the object that
+owns the device — compose it once in the constructor, reuse it for the
+lifetime of the object across every hot-loop call:
+
+```cpp
+#include <messageframe/MessageFrame.hpp>
+#include <string>
+
+class GeneratorSensor {
+private:
+    std::string m_name;
+    // Store the FlatKeys directly as fields on the object.
+    msgframe::FlatKey m_volt_key;
+    msgframe::FlatKey m_freq_key;
+
+public:
+    // Constructor runs ONCE, e.g. at startup.
+    explicit GeneratorSensor(std::string_view device_name)
+        : m_name(device_name),
+          // Compose the keys up front — the concatenation and the '\x1F'
+          // insertion happen HERE, not in the hot loop below.
+          m_volt_key(msgframe::FlatKey::compose(device_name, "voltage")),
+          m_freq_key(msgframe::FlatKey::compose(device_name, "frequency"))
+    {}
+
+    // This method runs thousands of times per second in the hot loop.
+    void process_telemetry(msgframe::MessageFrame& frame, double volt, double freq) {
+        // Zero per-call key-composition overhead — reuses the keys
+        // that were already built once in the constructor.
+        frame.set_flat(m_volt_key, msgframe::VALUE(volt));
+        frame.set_flat(m_freq_key, msgframe::VALUE(freq));
+    }
+};
+
+int main() {
+    // 1. System init — construct the sensor object once, ahead of time.
+    GeneratorSensor main_generator("generator_5kw");
+
+    msgframe::MessageFrame frame;
+    std::vector<uint8_t> wire_buffer;
+
+    // 2. Hot loop — sends telemetry frames repeatedly.
+    while (true) {
+        double current_v = read_hardware_voltage();
+        double current_f = read_hardware_frequency();
+
+        // The FlatKeys stored on main_generator are reused here, unchanged.
+        main_generator.process_telemetry(frame, current_v, current_f);
+
+        frame.serialize(wire_buffer);
+        // ... send wire_buffer over the network ...
+        frame.clear();
+    }
+}
+```
+
 ### What does clear() do
 
 The `clear()` method completely frees the memory allocated for the hash map in the heap, 
