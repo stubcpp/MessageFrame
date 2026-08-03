@@ -297,11 +297,13 @@ the resulting binaries are:
 ```bash
 # Windows
 .\build\Release\messageframe_example.exe
+.\build\Release\messageframe_extended_example.exe
 .\build\Release\messageframe_benchmark.exe --iterations 50000 --params 4
 .\build\Release\messageframe_tests.exe
  
 # Linux / macOS
 ./build/messageframe_example
+./build/messageframe_extended_example
 ./build/messageframe_benchmark --iterations 50000 --params 4
 ./build/messageframe_tests
 ```
