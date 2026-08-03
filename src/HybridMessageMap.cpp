@@ -41,12 +41,27 @@ namespace msgframe {
     template bool msgframe::HybridMessageMap::update_impl<const msgframe::ParameterValue&>(std::string_view, std::string_view, const msgframe::ParameterValue&);
     template bool msgframe::HybridMessageMap::update_impl<msgframe::ParameterValue>(std::string_view, std::string_view, msgframe::ParameterValue&&);
 
-    HybridMessageMap::HybridMessageMap() : 
-        is_vector_mode(true),
-        map_storage(nullptr) {
+    HybridMessageMap::HybridMessageMap() : HybridMessageMap(FrameConfig{}) {}
 
-        // Optimize the vector for the CPU L1 cache line 
-        vector_storage.reserve(SMALL_CAPACITY);
+    HybridMessageMap::HybridMessageMap(const FrameConfig& config)
+        : cfg_(config), is_vector_mode(true), map_storage(nullptr) {
+        prime_storage();
+    }
+
+    void HybridMessageMap::prime_storage() {
+        if (cfg_.initial_reserve > SMALL_CAPACITY) {
+            // Skip vector mode entirely: add()/add_flat() never touch the
+            // vector, convert_to_map() never runs, and the map is sized for
+            // the real expected count instead of SMALL_CAPACITY — this is
+            // what actually removes the rehash overhead on large frames.
+            is_vector_mode = false;
+            map_storage = std::make_unique<MapImpl>();
+            map_storage->map.reserve(cfg_.initial_reserve);
+        }
+        else {
+            is_vector_mode = true;
+            vector_storage.reserve(SMALL_CAPACITY); // unchanged from today
+        }
     }
 
     HybridMessageMap::~HybridMessageMap() noexcept {};
@@ -208,6 +223,16 @@ namespace msgframe {
         vector_storage.clear();
         map_storage.reset();
         is_vector_mode = true;
+        try {
+            prime_storage(); // re-apply the original hint, not just "forget" it
+        }
+        catch (const std::bad_alloc&) {
+            // Preserve clear()'s noexcept contract even on OOM: fall back to
+            // lazy vector mode instead of terminating a hot-path clear().
+            is_vector_mode = true;
+            map_storage.reset();
+            vector_storage.reserve(SMALL_CAPACITY);
+        }
     }
 
     size_t HybridMessageMap::size() const noexcept {

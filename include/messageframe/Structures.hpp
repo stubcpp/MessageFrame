@@ -128,4 +128,18 @@ namespace msgframe {
     private:
         std::vector<uint8_t>& m_buf;
     };
+
+    // Optional construction/reset hint for HybridMessageMap / MessageFrame.
+    // Lets the caller tell the library the expected final parameter count so it
+    // can pick storage mode up front instead of filling a vector to
+    // SMALL_CAPACITY and then migrating it into the map with an
+    // under-sized reserve().
+    //
+    // NOTE: this does NOT make SMALL_CAPACITY itself configurable — see
+    // HybridMessageMap for why (unpack() has no access to a receiver-side
+    // config, and the threshold is used as a compile-time constant in
+    // several hot paths). It only controls the initial mode/capacity.
+    struct FrameConfig {
+        size_t initial_reserve = 0; // 0 = unknown, today's behavior unchanged
+    };
 }

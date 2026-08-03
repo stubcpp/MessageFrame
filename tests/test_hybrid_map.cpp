@@ -1,11 +1,13 @@
 // tests/test_hybrid_map.cpp
 #include "test_framework.hpp"
 #include <messageframe/HybridMessageMap.hpp>
+#include <messageframe/Structures.hpp>
 #include <messageframe/Value.hpp>
 #include <string>
 
 using msgframe::HybridMessageMap;
 using msgframe::ParameterValue;
+using msgframe::FrameConfig;
 
 // --------------------------------------------------------------------
 // Group: MemoryAndLifecycle — Checking the management of non-trivial objects
@@ -133,6 +135,136 @@ TEST(Mutations, InplaceValueTypeMutationViaSet) {
         CHECK(s.has_value());
         if (s) CHECK_EQ(*s, std::string("mutated_to_string"));
     }
+}
+
+// --------------------------------------------------------------------
+// Group: FrameConfigHints — Indirect verification of storage-mode
+// selection via FrameConfig::initial_reserve.
+//
+// is_vector_mode is private, so we can't assert on it directly. Instead
+// we exploit an observable side effect: HybridMessageMap::iterate()
+// preserves insertion order in vector mode (flat contiguous storage)
+// but does NOT in map mode (tsl::robin_map iterates in bucket order).
+// With enough distinct keys, a hash-ordered iteration coinciding with
+// insertion order by chance is statistically negligible.
+// --------------------------------------------------------------------
+
+namespace {
+    void collect_flat_keys(std::string_view flat_key, const ParameterValue& /*val*/, void* user_data) {
+        auto* keys = static_cast<std::vector<std::string>*>(user_data);
+        keys->emplace_back(flat_key);
+    }
+} // namespace
+
+TEST(FrameConfigHints, DefaultConfigPreservesInsertionOrderBelowThreshold) {
+    // Control test: confirms the detection method itself is valid before
+    // we rely on it for the map-mode assertions below.
+    HybridMessageMap map; // FrameConfig{} — today's default behavior
+
+    std::vector<std::string> expected_order;
+    for (size_t i = 0; i < 10; ++i) {
+        std::string device = "dev";
+        std::string param = "p" + std::to_string(i);
+        map.add(device, param, ParameterValue(static_cast<int64_t>(i)));
+        expected_order.push_back(device + "\x1F" + param);
+    }
+
+    std::vector<std::string> observed_order;
+    map.iterate(collect_flat_keys, &observed_order);
+
+    CHECK_EQ(observed_order.size(), expected_order.size());
+    CHECK(observed_order == expected_order);
+}
+
+TEST(FrameConfigHints, LargeInitialReserveStartsInMapModeImmediately) {
+    FrameConfig cfg;
+    cfg.initial_reserve = HybridMessageMap::SMALL_CAPACITY * 4; // e.g. 512
+
+    HybridMessageMap map(cfg);
+
+    // Insert well UNDER SMALL_CAPACITY. Without the hint this would stay
+    // in vector mode; with the hint it must already be in map mode.
+    std::vector<std::string> expected_order;
+    const size_t count = 40;
+    for (size_t i = 0; i < count; ++i) {
+        std::string device = "dev";
+        std::string param = "p" + std::to_string(i);
+        map.add(device, param, ParameterValue(static_cast<int64_t>(i)));
+        expected_order.push_back(device + "\x1F" + param);
+    }
+
+    CHECK_EQ(map.size(), count);
+
+    std::vector<std::string> observed_order;
+    map.iterate(collect_flat_keys, &observed_order);
+
+    CHECK_EQ(observed_order.size(), expected_order.size());
+    // Map mode => iteration order must NOT match insertion order.
+    CHECK_FALSE(observed_order == expected_order);
+
+    // Correctness, not just "it's a map": every key must still resolve.
+    for (size_t i = 0; i < count; ++i) {
+        const auto* v = map.find("dev", "p" + std::to_string(i));
+        CHECK_NOT_NULL(v);
+    }
+}
+
+TEST(FrameConfigHints, HintSurvivesClear) {
+    // This is the regression test for the clear() fix — before it,
+    // clear() unconditionally reset the container to vector mode and
+    // forgot the original hint, defeating FrameConfig for any
+    // reused-in-a-loop MessageFrame.
+    FrameConfig cfg;
+    cfg.initial_reserve = HybridMessageMap::SMALL_CAPACITY * 4;
+
+    HybridMessageMap map(cfg);
+    for (size_t i = 0; i < 5; ++i) {
+        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<int64_t>(i)));
+    }
+
+    map.clear();
+    CHECK_EQ(map.size(), static_cast<size_t>(0));
+
+    // Refill with only a handful of items — far below SMALL_CAPACITY.
+    std::vector<std::string> expected_order;
+    const size_t count = 40; // enough to make order-collision negligible
+    for (size_t i = 0; i < count; ++i) {
+        std::string device = "dev";
+        std::string param = "q" + std::to_string(i);
+        map.add(device, param, ParameterValue(static_cast<int64_t>(i)));
+        expected_order.push_back(device + "\x1F" + param);
+    }
+
+    std::vector<std::string> observed_order;
+    map.iterate(collect_flat_keys, &observed_order);
+
+    // Still in map mode after clear() => hint was preserved.
+    CHECK_FALSE(observed_order == expected_order);
+}
+
+TEST(FrameConfigHints, ZeroReserveClearStillResetsToVectorMode) {
+    // Backward-compat guard: with NO hint (default FrameConfig, the same
+    // as pre-patch behavior), clear() must still reset to vector mode —
+    // we must not have silently changed default behavior.
+    HybridMessageMap map; // initial_reserve == 0
+
+    const size_t count = HybridMessageMap::SMALL_CAPACITY + 20;
+    for (size_t i = 0; i < count; ++i) {
+        map.add("dev", "p" + std::to_string(i), ParameterValue(static_cast<int64_t>(i)));
+    }
+    map.clear();
+
+    std::vector<std::string> expected_order;
+    for (size_t i = 0; i < 10; ++i) {
+        std::string device = "dev";
+        std::string param = "r" + std::to_string(i);
+        map.add(device, param, ParameterValue(static_cast<int64_t>(i)));
+        expected_order.push_back(device + "\x1F" + param);
+    }
+
+    std::vector<std::string> observed_order;
+    map.iterate(collect_flat_keys, &observed_order);
+    CHECK(observed_order == expected_order); // vector mode => order preserved
 }
 
 int main() {

@@ -29,6 +29,7 @@ namespace msgframe {
         static constexpr size_t SMALL_CAPACITY = 128;
 
         HybridMessageMap();
+        explicit HybridMessageMap(const FrameConfig& config);
         ~HybridMessageMap() noexcept;
 
         // Moving is allowed, copying is prohibited
@@ -205,13 +206,14 @@ namespace msgframe {
 
     private:
         void convert_to_map();
+        void prime_storage(); // Shared logic for selecting mode/reserve
         void map_emplace_rvalue(std::string_view device, std::string_view param, ParameterValue&& val);
         void map_emplace_lvalue(std::string_view device, std::string_view param, const ParameterValue& val);
         ParameterValue* map_find_mutable(std::string_view device, std::string_view param) noexcept;
 
         bool is_vector_mode{true};
         std::vector<std::pair<ParameterKey, ParameterValue>> vector_storage; // CPU L1-cache line
-		
+        FrameConfig cfg_;
 		struct MapImpl;
         std::unique_ptr<MapImpl> map_storage; // Hidden tsl::robin_map
     };
