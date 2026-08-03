@@ -73,8 +73,8 @@ per-device struct or serialization code to maintain.
   
 ## Sizing hint via `FrameConfig` (optional)
 
-`FrameConfig` does not move `SMALL_CAPACITY` — the vector→map switching
-threshold is still fixed at 128. What it controls is which mode the
+As described above, `FrameConfig` does not move `SMALL_CAPACITY` — the
+vector->map switching threshold stays fixed at 128. What it controls is which mode the
 container *starts* in and how much capacity it reserves there, for cases
 where you already know a message will hold many more parameters than
 `SMALL_CAPACITY`:
