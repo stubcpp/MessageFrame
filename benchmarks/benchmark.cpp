@@ -28,8 +28,16 @@ enum class MyMsgType : int32_t {
 
 // A simple callback to demonstrate fast iterator traversal
 void printParamCallback(std::string_view flat_key, const msgframe::ParameterValue& val, void* /*user_data*/) {
-    std::cout << "  [Iterate] " << flat_key << " = " << val.toString() << "\n";
+    size_t sep_pos = flat_key.find('\x1F');
+    std::cout << "  [Iterate] ";
+    if (sep_pos != std::string_view::npos) {
+        std::cout << flat_key.substr(0, sep_pos) << "." << flat_key.substr(sep_pos + 1);
+    } else {
+        std::cout << flat_key;
+    }
+    std::cout << " = " << val.toString() << "\n";
 }
+
 
 struct BenchmarkConfig {
     size_t iterations = 100'000;
