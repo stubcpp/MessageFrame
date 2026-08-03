@@ -43,7 +43,20 @@ enum class MyMsgType : int32_t {
 // Callback for iterate_parameters() — invoked for each parameter
 // in the message, without creating temporary std::string for the key.
 void printParam(std::string_view flat_key, const msgframe::ParameterValue& val, void* /*user_data*/) {
-    std::cout << "  [Iterate] " << flat_key << " = " << val.toString() << "\n";
+    // Find the position of our internal guard separator \x1F
+    size_t sep_pos = flat_key.find('\x1F');
+
+    std::cout << "  [Iterate] ";
+
+    if (sep_pos != std::string_view::npos) {
+        // Print the part before the separator (device), the period, and the part after (parameter)
+        std::cout << flat_key.substr(0, sep_pos) << "." << flat_key.substr(sep_pos + 1);
+    } else {
+        // Just in case there is no separator
+        std::cout << flat_key;
+    }
+
+    std::cout << " = " << val.toString() << "\n";
 }
 
 int main() {
