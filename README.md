@@ -360,7 +360,7 @@ void printParam(std::string_view flat_key, const msgframe::ParameterValue& val, 
     // Find the position of our internal guard separator \x1F
     size_t sep_pos = flat_key.find('\x1F');
 
-    std::cout << " [Iterate] ";
+    std::cout << "  [Iterate] ";
 
     if (sep_pos != std::string_view::npos) {
         // Print the part before the separator (device), the period, and the part after (parameter)
