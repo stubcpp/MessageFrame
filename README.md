@@ -43,6 +43,34 @@ single message. Independent devices or subsystems can contribute parameters
 to the same message without knowing about each other, and there's no
 per-device struct or serialization code to maintain.
 
+## 🚀 Key features
+ 
+- **⚡ Schema-less, but typed.** No `.proto`/`.fbs` files, no external
+  compilers in the build pipeline, no generated code. Parameters keep their
+  type (`int64_t`, `double`, `bool`, `string`) through `ParameterValue`, and
+  the whole API is just `msg.add(...)` / `msg.find(...)`.
+- **🔌 Three-part layout.** Each message separates concerns clearly:
+  - **Header** — fixed-size, for routing without parsing the full message.
+  - **Parameters** — small metrics/commands, addressed by `device.parameter`.
+  - **Attachments** — heavy binary payloads, stored and transmitted as-is.
+- **🛡️ Cache-friendly parameter storage.** Parameters are kept in a flat
+  `std::vector` as long as their count stays at or below `SMALL_CAPACITY`
+  (128 by default), avoiding heap allocation and maximizing cache locality
+  for the common case. Once that threshold is exceeded, the container
+  transparently switches to a hash map (`tsl::robin_map`) — the API doesn't
+  change, lookups stay fast at any size.
+- **🎯 Optional sizing hint (`FrameConfig`).** If you know a message will
+  hold more than `SMALL_CAPACITY` parameters ahead of time, pass a
+  `FrameConfig{ .initial_reserve = N }` to `MessageFrame`'s constructor.
+  This skips the vector-fill-then-migrate step entirely and reserves the
+  hash map for the real expected size instead of `SMALL_CAPACITY`,
+  avoiding extra rehashing. It's a pure hint: the default (`initial_reserve
+  = 0`) reproduces today's behavior exactly, and it does **not** change
+  `SMALL_CAPACITY` itself — see below.
+- **💾 MessagePack wire format.** Serialization produces standard MessagePack,
+  so messages can be read by any MessagePack-compatible implementation, not
+  just this library.
+  
 ## Sizing hint via `FrameConfig` (optional)
 
 `FrameConfig` does not move `SMALL_CAPACITY` — the vector→map switching
@@ -73,34 +101,6 @@ and re-converting on the next fill. Leave `initial_reserve` at its
 default (`0`) and nothing changes: same vector-first behavior as before
 this feature existed.
 
-## 🚀 Key features
- 
-- **⚡ Schema-less, but typed.** No `.proto`/`.fbs` files, no external
-  compilers in the build pipeline, no generated code. Parameters keep their
-  type (`int64_t`, `double`, `bool`, `string`) through `ParameterValue`, and
-  the whole API is just `msg.add(...)` / `msg.find(...)`.
-- **🔌 Three-part layout.** Each message separates concerns clearly:
-  - **Header** — fixed-size, for routing without parsing the full message.
-  - **Parameters** — small metrics/commands, addressed by `device.parameter`.
-  - **Attachments** — heavy binary payloads, stored and transmitted as-is.
-- **🛡️ Cache-friendly parameter storage.** Parameters are kept in a flat
-  `std::vector` as long as their count stays at or below `SMALL_CAPACITY`
-  (128 by default), avoiding heap allocation and maximizing cache locality
-  for the common case. Once that threshold is exceeded, the container
-  transparently switches to a hash map (`tsl::robin_map`) — the API doesn't
-  change, lookups stay fast at any size.
-- **🎯 Optional sizing hint (`FrameConfig`).** If you know a message will
-  hold more than `SMALL_CAPACITY` parameters ahead of time, pass a
-  `FrameConfig{ .initial_reserve = N }` to `MessageFrame`'s constructor.
-  This skips the vector-fill-then-migrate step entirely and reserves the
-  hash map for the real expected size instead of `SMALL_CAPACITY`,
-  avoiding extra rehashing. It's a pure hint: the default (`initial_reserve
-  = 0`) reproduces today's behavior exactly, and it does **not** change
-  `SMALL_CAPACITY` itself — see below.
-- **💾 MessagePack wire format.** Serialization produces standard MessagePack,
-  so messages can be read by any MessagePack-compatible implementation, not
-  just this library.
-  
 ## Typical use cases
  
 - **Controlling multiple SDR devices at once.** A single TX/RX SDR exposes
