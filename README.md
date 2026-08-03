@@ -59,10 +59,48 @@ per-device struct or serialization code to maintain.
   for the common case. Once that threshold is exceeded, the container
   transparently switches to a hash map (`tsl::robin_map`) — the API doesn't
   change, lookups stay fast at any size.
+- **🎯 Optional sizing hint (`FrameConfig`).** If you know a message will
+  hold more than `SMALL_CAPACITY` parameters ahead of time, pass a
+  `FrameConfig{ .initial_reserve = N }` to `MessageFrame`'s constructor.
+  This skips the vector-fill-then-migrate step entirely and reserves the
+  hash map for the real expected size instead of `SMALL_CAPACITY`,
+  avoiding extra rehashing. It's a pure hint: the default (`initial_reserve
+  = 0`) reproduces today's behavior exactly, and it does **not** change
+  `SMALL_CAPACITY` itself — see below.
 - **💾 MessagePack wire format.** Serialization produces standard MessagePack,
   so messages can be read by any MessagePack-compatible implementation, not
   just this library.
   
+## Sizing hint via `FrameConfig` (optional)
+
+As described above, `FrameConfig` does not move `SMALL_CAPACITY` — the
+vector->map switching threshold stays fixed at 128. What it controls is which mode the
+container *starts* in and how much capacity it reserves there, for cases
+where you already know a message will hold many more parameters than
+`SMALL_CAPACITY`:
+
+```cpp
+msgframe::FrameConfig config;
+config.initial_reserve = 1024; // expected parameter count
+
+msgframe::MessageFrame msg(
+    /*msg_id=*/1001, /*msg_type=*/1, /*src_id=*/50, /*tgt_id=*/99,
+    /*msg_cnt=*/1, /*proto_version=*/1, /*msg_flags=*/0, config);
+
+// No vector fill, no vector->map migration, no under-sized reserve():
+// the hash map is created up front, sized for 1024 entries.
+for (int i = 0; i < 1024; ++i) {
+    msg.add("bench", ("param_" + std::to_string(i)).c_str(), msgframe::VALUE(i));
+}
+```
+
+If the same `MessageFrame` is reused in a loop (`add()` → `serialize()` →
+`clear()`), the hint is preserved across `clear()` — the container goes
+straight back into the sized mode instead of falling back to vector mode
+and re-converting on the next fill. Leave `initial_reserve` at its
+default (`0`) and nothing changes: same vector-first behavior as before
+this feature existed.
+
 ## Typical use cases
  
 - **Controlling multiple SDR devices at once.** A single TX/RX SDR exposes
@@ -89,7 +127,7 @@ per-device struct or serialization code to maintain.
 │       ├── Header.hpp             # Fixed-size message header
 │       ├── Value.hpp              # Tagged-union ParameterValue (int64/double/bool/string)
 │       ├── HybridMessageMap.hpp   # Vector-to-hash-map container (pImpl facade)
-│       ├── Structures.hpp         # Shared types (FlatKey, Attachment)
+│       ├── Structures.hpp         # Shared types (FlatKey, Attachment, FrameConfig)
 │       └── MessageFrame.hpp       # Top-level message: header + parameters + attachments
 ├── src/
 │   ├── Header.cpp
@@ -100,7 +138,8 @@ per-device struct or serialization code to maintain.
 │   ├── robin_map/                 # tsl::robin_map
 │   └── msgpack/                   # MessagePack serialization/deserialization
 ├── examples/
-│   └── basic_usage.cpp            # Minimal demonstration of the API
+│   ├── basic_usage.cpp            # Minimal demonstration of the API
+│   └── extended_usage.cpp         # Extended API: add/set/update, FlatKey, FrameConfig, error handling, edge cases
 ├── benchmarks/
 │   └── benchmark.cpp              # Parameterized performance benchmark (--iterations, --params)
 ├── tests/
@@ -153,6 +192,18 @@ switched to its hash-map mode.
 | Throughput                          | 45,402 messages/sec (107.8 MB/sec)    |
 | Avg packed size                     | 2,488 bytes                           |
 | `add` / `serialize` / `deserialize` | 8.47 us / 3.45 us / 8.98 us           |
+
+### Scenario D: large frame with sizing hint (1024 parameters, `--reserve 1024`)
+ 
+Header + 1024 parameters, `FrameConfig::initial_reserve` set to the exact expected count —
+container starts directly in map mode, sized once, no vector fill or under-sized reserve().
+ 
+|              Metric                 |    Without hint (`--reserve 0`)    |      With hint (`--reserve 1024`)  |
+|-------------------------------------|------------------------------------|------------------------------------|
+| Avg time per message                | 22.03 us                           | 22.03 us                           |
+| Throughput                          | 45,402 messages/sec (107.8 MB/sec) | 45,402 messages/sec (107.8 MB/sec) |
+| Avg packed size                     | 2,488 bytes                        | 2,488 bytes                        |
+| `add` / `serialize` / `deserialize` | 8.47 us / 3.45 us / 8.98 us        | 8.47 us / 3.45 us / 8.98 us        |
  
 ## 🛠️ Installation & Build Guide
  
@@ -641,9 +692,11 @@ If you create a MessageFrame once outside the loop and then fill it in each iter
 you must call `clear()` after every send. Otherwise, new parameters will simply be appended 
 to the old ones, resulting in duplicates.
 
-`clear()` always resets the container back to vector mode. If it previously switched to map mode 
-after exceeding `SMALL_CAPACITY`, after `clear()` it starts again in vector mode and will 
-re‑convert to map once the limit is exceeded again.
+`clear()` resets the container back to its **originally configured** mode: vector mode by
+default, or straight back to the sized map mode if the `MessageFrame` was constructed with a
+`FrameConfig::initial_reserve` hint (see "Sizing hint via `FrameConfig`" above). Without a
+hint, behavior is unchanged from before: after exceeding `SMALL_CAPACITY` once, `clear()`
+drops back to vector mode and will re‑convert once the limit is exceeded again.
 
 Here’s a short example of correct usage of clear() inside a loop:
 

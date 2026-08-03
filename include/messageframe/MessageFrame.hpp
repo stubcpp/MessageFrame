@@ -28,12 +28,26 @@ namespace msgframe {
 class MessageFrame {
     public:
         MessageFrame() = default;
+        explicit MessageFrame(const FrameConfig& config) : parameters(config) {}
 
         // Ctor for fast initialization
         template <typename IdT, typename TypeT>
-        MessageFrame(IdT msg_id, TypeT msg_type, uint32_t src_id, uint32_t tgt_id,
-            uint64_t msg_cnt = 0, uint16_t proto_version = 1, uint16_t msg_flags = 0) noexcept
-            : m_header(msg_id, msg_type, src_id, tgt_id, msg_cnt, proto_version, msg_flags) {
+        MessageFrame(IdT msg_id, 
+            TypeT msg_type, 
+            uint32_t src_id, 
+            uint32_t tgt_id,
+            uint64_t msg_cnt = 0, 
+            uint16_t proto_version = 1, 
+            uint16_t msg_flags = 0,
+            FrameConfig config = FrameConfig())            // noexcept removed
+            : m_header(msg_id, 
+                msg_type, 
+                src_id, 
+                tgt_id, 
+                msg_cnt, 
+                proto_version, 
+                msg_flags)
+            , parameters(config) {
         }
 
         // Direct access to the header

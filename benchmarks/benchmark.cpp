@@ -40,15 +40,17 @@ void printParamCallback(std::string_view flat_key, const msgframe::ParameterValu
 
 
 struct BenchmarkConfig {
-    size_t iterations = 100'000;
-    size_t params_count = 150;
+    size_t iterations = 200'000;
+    size_t params_count = 4;
+    size_t reserve_hint = 0; // FrameConfig::initial_reserve, 0 = disabled
 };
 
 void printUsage(const char* prog_name) {
-    std::cout << "Usage: " << prog_name << " [--iterations N] [--params N]\n"
-              << "  --iterations N   Number of message lifecycle iterations (default: 100000)\n"
-              << "  --params N       Number of parameters per message (default: 150)\n"
-              << "  -h, --help       Show this help message\n";
+    std::cout << "Usage: " << prog_name << " [--iterations N] [--params N] [--reserve N]\n"
+              << " --iterations N Number of message lifecycle iterations (default: 200000)\n"
+              << " --params N Number of parameters per message (default: 2)\n"
+              << " --reserve N FrameConfig::initial_reserve hint (default: 0 = disabled)\n"
+              << " -h, --help Show this help message\n";
 }
 
 BenchmarkConfig parseArgs(int argc, char** argv) {
@@ -58,6 +60,8 @@ BenchmarkConfig parseArgs(int argc, char** argv) {
             cfg.iterations = static_cast<size_t>(std::strtoull(argv[++i], nullptr, 10));
         } else if (std::strcmp(argv[i], "--params") == 0 && i + 1 < argc) {
             cfg.params_count = static_cast<size_t>(std::strtoull(argv[++i], nullptr, 10));
+        } else if (std::strcmp(argv[i], "--reserve") == 0 && i + 1 < argc) {
+            cfg.reserve_hint = static_cast<size_t>(std::strtoull(argv[++i], nullptr, 10));
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             printUsage(argv[0]);
             std::exit(0);
@@ -133,8 +137,13 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     serialization_buffer.reserve(32768);
 
     std::cout << "Running " << cfg.iterations << " iterations with "
-              << cfg.params_count << " parameters each...\n";
+              << cfg.params_count << " parameters each"
+              << (cfg.reserve_hint > 0 ? " (reserve hint: " + std::to_string(cfg.reserve_hint) + ")" : "")
+              << "...\n";
     std::cout << "(Zero-Allocation key injection via pre-allocated Key Pool)\n\n";
+
+    msgframe::FrameConfig frame_cfg;
+    frame_cfg.initial_reserve = cfg.reserve_hint;
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -157,7 +166,7 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     for (size_t i = 0; i < cfg.iterations; ++i) {
         serialization_buffer.clear();
 
-        msgframe::MessageFrame bench_msg(200, 7, 1, 2, i);
+        msgframe::MessageFrame bench_msg(200, 7, 1, 2, i, /*proto_version=*/1, /*msg_flags=*/0, frame_cfg);
 
         auto t0 = std::chrono::high_resolution_clock::now();
         for (size_t p = 0; p < cfg.params_count; ++p) {
@@ -217,6 +226,8 @@ void runBenchmark(const BenchmarkConfig& cfg) {
     std::cout << "Throughput:        " << std::fixed << std::setprecision(2) << throughput_mb << " MB/sec\n";
     std::cout << "Success Rate:      " << (successful_deserializations == cfg.iterations ? "100% OK" : "ERROR") << "\n";
     std::cout << "Avg Packed Size:   " << (total_bytes_processed / cfg.iterations) << " bytes\n";
+    std::cout << "Reserve hint:      " << cfg.reserve_hint
+        << (cfg.reserve_hint > 0 ? " (FrameConfig applied)" : " (default lazy sizing)") << "\n";
     std::cout << "sum_add:           " << (sum_add / cfg.iterations) << " us\n";
     std::cout << "sum_find:          " << (sum_find / cfg.iterations) << " us  (worst-case: last-inserted key)\n";
     std::cout << "sum_serialize:     " << (sum_serialize / cfg.iterations) << " us\n";
