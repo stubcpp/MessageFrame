@@ -89,6 +89,9 @@ option(MSGFRAME_BUILD_EXAMPLES "Build messageframe usage examples" ON)
 if(MSGFRAME_BUILD_EXAMPLES)
     add_executable(messageframe_example examples/basic_usage.cpp)
     target_link_libraries(messageframe_example PRIVATE msg_frame)
+	
+	add_executable(messageframe_extended_example examples/extended_usage.cpp)
+    target_link_libraries(messageframe_extended_example PRIVATE msg_frame)
 endif()
 
 # ------------------------------------------------------------------

@@ -138,7 +138,8 @@ this feature existed.
 │   ├── robin_map/                 # tsl::robin_map
 │   └── msgpack/                   # MessagePack serialization/deserialization
 ├── examples/
-│   └── basic_usage.cpp            # Minimal demonstration of the API
+│   ├── basic_usage.cpp            # Minimal demonstration of the API
+│   └── extended_usage.cpp         # Extended API: add/set/update, FlatKey, FrameConfig, error handling, edge cases
 ├── benchmarks/
 │   └── benchmark.cpp              # Parameterized performance benchmark (--iterations, --params)
 ├── tests/
