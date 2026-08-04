@@ -78,7 +78,7 @@ for (int i = 0; i < 1024; ++i) {
 When reusing a `MessageFrame` instance inside a critical processing loop via the `msg.clear()` method, the `initial_reserve` hint **is fully preserved**.
 
 * **Without Hint:** `clear()` resets the container back to an empty `std::vector` (causing a repeated cycle of vector allocation ➔ fill ➔ map allocation ➔ data migration ➔ table rehashing on every single iteration).
-* **With Hint:** `clear()` flushes the elements but **retains the fully allocated `tsl::robin_map` memory blocks**. The container immediately restarts in map mode, keeping subsequent insertions completely allocation-free and dropping insertion execution costs by **over 38%**.
+* **With Hint:** `clear()` flushes the elements but **retains the fully allocated `tsl::robin_map` memory blocks**. The container immediately restarts in map mode, keeping subsequent insertions completely allocation-free and dropping insertion execution costs by **over 53%**.
 
 
 ## 🗂️ Project Workspace Layout
