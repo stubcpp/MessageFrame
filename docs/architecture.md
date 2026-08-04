@@ -83,7 +83,7 @@ When reusing a `MessageFrame` instance inside a critical processing loop via the
 
 ## 🗂️ Project Workspace Layout
 
-```text
+```
 ├── include/
 │   └── messageframe/
 │       ├── Header.hpp             # Fixed-size message header
