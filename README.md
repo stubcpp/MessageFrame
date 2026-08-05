@@ -102,6 +102,9 @@ msg.add("device_core",  "fw_version", msgframe::VALUE("v3.2.1"));
 std::vector<uint8_t> buffer;
 msg.serialize(buffer);
 
+// Buffer is now a flat byte array, ready to be sent over Network (TCP/UDP), DMA, or IPC
+// [Host/Source] ---> ( Network / DMA / IPC ) ---> [Target/Destination]
+
 msgframe::MessageFrame received;
 if (received.deserialize(buffer.data(), buffer.size())) {
     if (const auto* val = received.find("device_core", "fw_version")) {
