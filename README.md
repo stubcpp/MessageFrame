@@ -10,7 +10,7 @@ no code generation. Add a parameter and serialize it in two lines.
 ## What is this library for
 
 Many telemetry and control systems rely on schema-based messaging frameworks
-such as Protocol Buffers or FlatBuffers. They're powerful, but they require
+such as Google Protocol Buffers (Protobuf) or FlatBuffers. They're powerful, but they require
 predefined `.proto`/`.fbs` files and a code generation step — which gets in
 the way when message structure is decided at runtime rather than fixed at
 compile time.
