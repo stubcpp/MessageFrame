@@ -1,29 +1,38 @@
 # MessageFrame
 
-A lightweight, header-only C++17 library for structured network messaging:
-typed key-value parameters, MessagePack serialization, and raw binary attachments.
-No schema files, no code generation. Add parameters and serialize in just two lines.
+A lightweight C++17 library for structured network messaging: typed key-value
+parameters, MessagePack serialization, and binary attachments. No schema files,
+no code generation. Add a parameter and serialize it in two lines.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 
 ## What is this library for
 
-Many telemetry and control systems rely on schema-based messaging frameworks like Google Protocol Buffers (Protobuf) or FlatBuffers. They are powerful, but they require predefined `.proto`/`.fbs` files and an ahead-of-time code generation step. This becomes a major bottleneck when the **message structure is determined at runtime** rather than fixed at compile time.
+Many telemetry and control systems rely on schema-based messaging frameworks
+such as Protocol Buffers or FlatBuffers. They're powerful, but they require
+predefined `.proto`/`.fbs` files and a code generation step — which gets in
+the way when message structure is decided at runtime rather than fixed at
+compile time.
 
-**MessageFrame** takes a different approach:
-* **No schema files, no code generation:** Messages are built dynamically from typed key-value parameters.
-* **All-in-one packet:** A single network frame carries small telemetry metrics alongside heavy, raw binary payloads (like IQ samples, spectra, or raw arrays).
+MessageFrame takes a different approach: messages are built dynamically from
+key-value parameters, with no schema files and no code generation. A single
+message can also carry heavy binary payloads (IQ samples, spectra, raw
+arrays) alongside its parameters, all in one packet.
 
-### The Trade-off: Runtime Flexibility vs. Zero-Copy
-MessageFrame deliberately trades zero-copy access for runtime flexibility. Unlike FlatBuffers, where data is read directly from the wire buffer, MessageFrame performs an explicit `deserialize()` step to rebuild its parameter map. This is the calculated price of eliminating `.proto` compilers from your build pipeline — a deliberate architectural trade-off, not an oversight.
+This trades zero-copy access for runtime flexibility. Unlike FlatBuffers,
+where data is read directly from the buffer without unpacking, MessageFrame
+performs an explicit `deserialize()` step to build its parameter map. That's
+the price of having no `.proto` files and no code generation — a deliberate
+trade-off, not an oversight.
 
-## Core Concept: Two-Part Keys
+## Core concept: two-part keys
 
-Instead of designing a custom C-struct for every message variation or forcing devices into rigid object trees, MessageFrame addresses every parameter using a composite approach: a **device identifier** and a **parameter name**.
+Instead of designing a custom struct for every device or message type, you
+address each parameter with two strings — a **device identifier** and a
+**parameter name**:
 
 ```cpp
-// Address parameters flatly without nesting structures — types are preserved dynamically
 msg.add("sdr_1",     "tx_gain",     msgframe::VALUE(10.0));
 msg.add("sdr_1",     "sample_rate", msgframe::VALUE(2'000'000.0));
 msg.add("sdr_2",     "rx_gain",     msgframe::VALUE(25.0));
@@ -32,164 +41,142 @@ msg.add("core",      "firmware",    msgframe::VALUE("v1.3.5"));
 msg.add("channel_1", "status_ok",   msgframe::VALUE(true));
 ```
 
-This design naturally builds a logical `device ➔ parameter ➔ value` hierarchy inside a single network packet.
+This naturally forms a `device -> parameter -> value` structure inside a
+single message. Independent devices or subsystems can contribute parameters
+to the same message without knowing about each other, and there's no
+per-device struct or serialization code to maintain. Adding a new device or
+metric to the stream is just another `.add()` call at runtime.
 
-### Why this matters for system architecture:
-* **Decoupled subsystems:** Isolated software modules or hardware drivers can safely dump their local telemetry into the same message frame without any prior knowledge of each other.
-* **Zero structural maintenance:** There are no monolithic data structures or per-device serialization schemas to maintain, update, and distribute across nodes.
-* **Plug-and-play scaling:** Adding a new device or metric to the stream is as trivial as invoking another `.add()` call at runtime.
+## Key features
 
-## Key Features
+- **Schema-less, but typed.** No `.proto`/`.fbs` files, no external
+  compilers in the build pipeline, no generated code. Parameters keep their
+  type (`int64_t`, `double`, `bool`, `string`) through `ParameterValue`, and
+  the whole API is just `msg.add(...)` / `msg.find(...)`.
+- **Three-part layout.** Each message separates a fixed-size **header**
+  (routing without parsing the body), small **parameters** addressed by
+  `device.parameter`, and heavy binary **attachments** stored as-is.
+- **Cache-friendly parameter storage.** Parameters live in a flat
+  `std::vector` up to `SMALL_CAPACITY` (128 by default) for allocation-free,
+  cache-local access, then transparently switch to a hash map
+  (`tsl::robin_map`) beyond that — the API doesn't change either way.
+- **Optional sizing hint (`FrameConfig`).** If you know a message will
+  exceed `SMALL_CAPACITY`, a hint lets the container start directly in map
+  mode, sized for the real count, skipping the fill-then-migrate step.
+- **MessagePack wire format.** Serialization produces standard MessagePack,
+  so messages can be read by any MessagePack-compatible implementation, not
+  just this library.
 
-* **Schema-less, yet strictly typed:** No `.proto`/`.fbs` files, no external compilers, and no code generation. Parameters preserve their underlying types (`int64_t`, `double`, `bool`, `std::string`) via `msgframe::VALUE`, accessed through a clean `msg.add(...)` / `msg.find(...)` API.
-* **Three-part frame layout:** Every network frame physically separates a fixed-size **header** (allowing low-overhead routing without parsing the payload), compact key-value **parameters**, and uncompressed, heavy **binary attachments** transmitted as-is.
-* **Cache-friendly hybrid storage:** Under the hood, parameters live in a flat, cache-local `std::vector` up to `SMALL_CAPACITY` (128 by default) for fast, allocation-free sequential access. It transparently switches to a high-performance hash map (`tsl::robin_map`) only when the parameter count exceeds the threshold.
-* **Explicit memory tuning (`FrameConfig`):** If you anticipate a massive message workload, you can pass a sizing hint to bypass the vector stage entirely. The container will initialize directly in map mode with a pre-allocated capacity, eliminating migration and rehashing overhead.
-* **Standard MessagePack wire format:** The parameter block serializes into compliant MessagePack payload data. Messages can be ingested and parsed by any standard MessagePack implementation across different language ecosystems.
+See [docs/architecture.md](docs/architecture.md) for the `HybridMessageMap`
+internals, the full frame layout, and how `FrameConfig` works under the hood.
 
-> 📄 *Detailed deep-dives into the `HybridMessageMap` internals, the three-part frame layout, and `FrameConfig` benchmarks can be found in [docs/architecture.md](docs/architecture.md).*
+## Typical use cases
 
-## Typical Use Cases
+- **Controlling multiple SDR devices at once.** A single TX/RX SDR exposes
+  dozens of configuration parameters (channel gain, sample rate, center
+  frequency, bandwidth, antenna mode, and so on). Each device is described
+  through the same API under a different device key, and everything fits
+  into one network message.
+- **Collecting telemetry from a fleet of devices.** Temperature, supply
+  voltage, connection status, firmware version, error codes — any number of
+  metrics from any number of sources, without a fixed schema.
+- **Command/control messages.** The same `device.parameter = value`
+  structure works for control commands (set frequency, enable channel,
+  change mode) and for status reports alike.
+- **Shipping raw data alongside metadata.** The `attachments` mechanism lets
+  you attach binary blobs — raw IQ samples, a captured spectrum snapshot —
+  without routing them through the parameter map.
 
-* **Controlling multiple SDR nodes simultaneously:** A single multi-channel TX/RX SDR platform can expose dozens of configuration parameters (gain, sample rate, center frequency, bandwidth, filter modes). Each sub-module dumps data into the same message frame under its own device key, collapsing complex configurations into **a single atomic network payload**.
-* **Aggregating fleet telemetry:** Perfect for gathering volatile metrics (temperature, supply voltages, RSSI, firmware versions, runtime error logs) from a distributed system without maintaining strict API schemas or breaking backward compatibility when a new metric is introduced.
-* **Unified command and control (C2):** The flexible `device -> parameter` schema natively fits asymmetrical communication patterns. The same architecture handles configuration commands (e.g., set frequency, enable channel) and periodic status reports alike.
-* **Streaming raw data with inline metadata:** The zero-overhead `attachments` pipeline allows you to bind raw binary blobs—such as high-rate IQ data chunks or spectrum snapshots—directly onto the structured metadata packet, **eliminating double-buffering or multi-socket alignment problems**.
-
-## Quick Start
+## Quick start
 
 ```cpp
 #include <messageframe/MessageFrame.hpp>
 #include <iostream>
 #include <vector>
 
-// Define your own strictly-typed application domains
-enum class MyMsgId : int32_t {
-    TELEMETRY_PACKET = 1001,
-    COMMAND_PACKET   = 1002
-};
+msgframe::MessageFrame msg(/*msg_id=*/1001, /*msg_type=*/1, /*src_id=*/50, /*tgt_id=*/99, /*msg_cnt=*/1);
 
-enum class MyMsgType : int32_t {
-    PERIODIC = 1,
-    CRITICAL = 2
-};
-
-// 1. Initialize a message frame with explicit metadata (enums cast internally)
-msgframe::MessageFrame msg(
-    MyMsgId::TELEMETRY_PACKET,
-    MyMsgType::CRITICAL,
-    50,          // source_id
-    99,          // target_id
-    1,           // message_counter  [optional]
-    1,           // protocol_version [optional]
-    0x0001       // message_flags    [optional]
-);
-
-// 2. Dynamically add typed key-value parameters
 msg.add("sensor_alpha", "voltage",    msgframe::VALUE(12.6));
 msg.add("device_core",  "fw_version", msgframe::VALUE("v3.2.1"));
 
-// 3. Serialize into a standard byte buffer
 std::vector<uint8_t> buffer;
 msg.serialize(buffer);
 
-// 4. Deserialize and safely query data on the receiving end
 msgframe::MessageFrame received;
 if (received.deserialize(buffer.data(), buffer.size())) {
     if (const auto* val = received.find("device_core", "fw_version")) {
-        // Type-safe retrieval using std::optional-like interfaces
+        // Typed access returns std::optional and never throws on a type mismatch
         if (auto as_string = val->tryGetString()) {
             std::cout << "Firmware version: " << *as_string << "\n";
         }
-
-        // Type mismatches are handled gracefully without runtime exceptions
-        auto as_int = val->tryGetInt();
-        std::cout << "tryGetInt() on a string value has_value() = "
-                  << std::boolalpha << as_int.has_value() << "\n"; // Outputs: false
     }
 }
 ```
 
-> 📖 *For a full walkthrough covering **header layouts, raw binary attachments, parameter iteration, `add()` vs `set()` vs `update()` semantics, performance-critical `FlatKey` structures for hot loops, and frame recycling (`clear()`)**, check out the comprehensive [API Guide](docs/api-guide.md).*
+A full walkthrough — header configuration, attachments, iteration,
+`add()`/`set()`/`update()` semantics, `FlatKey` for hot loops, and `clear()`
+— is in the [API guide](docs/api-guide.md).
 
-## Installation & Build
+## Installation
 
-No system-wide package managers are required. All dependencies (`msgpack-c`, `tsl::robin_map`) are vendored internally as Git submodules.
-
-### 1. Clone the repository recursively
 ```bash
 git clone --recursive https://github.com/stubcpp/MessageFrame.git
 cd MessageFrame
-```
-*If you cloned without `--recursive`, run `git submodule update --init --recursive` before building.*
-
-### 2. Build via CMake
-
-#### 🐧 Linux / macOS (GCC / Clang)
-```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-#### 🪟 Windows (Visual Studio / MSVC)
-```bash
-cmake -B build
-cmake --build build --config Release
-```
+If you cloned without `--recursive`, run
+`git submodule update --init --recursive` before building. No system-wide
+package manager is required — dependencies (`msgpack-c`, `tsl::robin_map`)
+are vendored as Git submodules. See the
+[installation guide](docs/installation.md) for the helper scripts,
+`FetchContent` integration, and manual source integration.
 
-> ⚙️ *For advanced integration methods—such as using automated **turnkey helper scripts**, integrating directly via **CMake `FetchContent`**, or performing **manual source-only (copy-paste) embedding**—please refer to the full [Installation Guide](docs/installation.md).*
+## Performance
 
-## Performance & Benchmarks
+Measured on an Intel Core 7 240H (Ubuntu 22.04, GCC, Release build). Unless
+noted otherwise, times cover the full per-message cycle: `add` →
+`serialize` → `deserialize`.
 
-MessageFrame is engineered for zero-overhead execution on critical data paths. Below are typical real-world benchmarks measured on an **Intel Core 7 240H** (Ubuntu 22.04, GCC, Release build).
+| Scenario | Time per message | Throughput | Packed size |
+|---|---|---|---|
+| 4 parameters | 0.68 us | ~1.47M msgs/sec | 84 bytes |
+| 127 parameters (vector-mode ceiling) | 10.41 us | ~96K msgs/sec | 2,075 bytes |
+| 150 parameters (hash-map mode) | 22.03 us | ~45K msgs/sec | 2,488 bytes |
+| 1,024 parameters, with sizing hint | 173.72 us | ~5.7K msgs/sec | 19,012 bytes |
 
-⚠️ **Crucial Note:** Unless specified otherwise, full cycle times reflect the **complete end-to-end pipeline** per message: dynamic parameter insertion (`add`) ➔ encoding (`serialize`) ➔ wire decoding (`deserialize`).
+For a 1024-parameter message, passing a `FrameConfig::initial_reserve`
+hint (see [Key features](#key-features) above, or
+[architecture.md](docs/architecture.md#sizing-hint-via-frameconfig-optional)
+for the details) avoids the vector-to-map migration and measurably reduces
+insertion cost:
 
-### Full End-to-End Pipeline Performance Snapshot
+| Metric (1,024 params/msg) | Without hint | With hint | Change |
+|---|---|---|---|
+| Parameter insertion (`sum_add`) | 88.14 us | 41.09 us | -53% |
+| Total time per message | 219.43 us | 173.72 us | -21% |
+| Throughput | 82.63 MB/sec | 104.37 MB/sec | +26% |
+| Point lookup (`sum_find`, worst case) | 0.06 us | 0.06 us | unchanged |
 
-| Payload Scenario | Full Cycle Time (Add+Serialize+Deserialize) | Throughput | Packed Size | Primary Storage Mode |
-| :--- | :--- | :--- | :--- | :--- |
-| **Small Frame** (4 parameters) | **0.68 μs** | ~1.47M msgs/sec | 84 bytes | Flat `std::vector` (Cache-local) |
-| **Peak Vector** (127 parameters) | **10.41 μs** | ~96K msgs/sec | 2,075 bytes | Flat `std::vector` (Threshold ceiling) |
-| **Large Frame** (150 parameters) | **22.03 μs** | ~45K msgs/sec | 2,488 bytes | Transparent `tsl::robin_map` switch |
-| **Massive Frame** (1024 parameters, with hint) | **173.72 μs** | ~5.7K msgs/sec | 19,012 bytes | Pre-allocated `tsl::robin_map` (Bypassed vector) |
+Point lookups stay at roughly 60 ns even at 1024 entries, since
+`tsl::robin_map` keeps its buckets in a contiguous array rather than
+chained nodes. Full results and methodology are in the
+[performance benchmarks](docs/performance.md).
 
----
+## Documentation
 
-### 🎯 The Power of Allocation Tuning (`FrameConfig`)
-
-When dealing with massive payloads (e.g., **1024 parameters** per message), migrating from a vector to a hash map on the fly causes a visible performance hit due to heap reallocations and table rehashing.
-
-By passing a `FrameConfig::initial_reserve` hint, you instruct the internal engine to skip the vector phase completely and instantiate a pre-sized `tsl::robin_map` up front.
-
-| Benchmark Metric (1024 params / msg) | Default Behavior (Lazy Sizing) | Optimized Behavior (With 1024 Hint) | Performance Delta |
-| :--- | :---: | :---: | :---: |
-| **Parameter Insertion (`sum_add`)** | 88.14 μs | **41.09 μs** | ⚡ **53.4% Faster** |
-| **Total Time per Message** | 219.43 μs | **173.72 μs** | 📈 **20.8% Faster** |
-| **Network Throughput** | 82.63 MB/sec | **104.37 MB/sec** | 🚀 **+21.74 MB/sec** |
-| **Point Lookup (`sum_find` worst-case)** | 0.06 μs | 0.06 μs | Identical $O(1)$ efficiency |
-
-### Key Takeaways:
-* **Sub-Microsecond Lookups:** Thanks to open-addressing in `tsl::robin_map`, fetching the very last inserted key (`find()`) out of 1024 elements takes a mere **60 nanoseconds** (`0.06 μs`).
-* **Serialization Efficiency:** MessagePack effortlessly packs a massive 19 KB key-value payload in **~27 μs**, making it a perfect fit for multi-device high-rate telemetry lines.
-
-> 📊 *For full micro-benchmarks breaking down internal layout topologies and execution costs across different hardware targets, see the [Performance Benchmarks Guide](docs/performance.md).*
-
-## Documentation & Deep-Dives
-
-MessageFrame is fully documented across dedicated sub-guides. Pick the topic that matches your immediate integration task:
-
-* 📐 **[Architecture & Internals](docs/architecture.md)** — Deep-dive into the `HybridMessageMap` layout mechanics, memory switching thresholds, and binary attachment boundaries.
-* 💻 **[API & Usage Guide](docs/api-guide.md)** — A complete, actionable reference covering `add()` vs `set()` vs `update()` semantic differences, `clear()` loop recycling, and hot-path lookups.
-* 📦 **[Installation & Integration](docs/installation.md)** — Step-by-step setup walkthroughs for native CMake configuration, Git submodules, `FetchContent` streaming, or raw source embedding.
-* 📈 **[Performance Benchmarks](docs/performance.md)** — Comprehensive runtime execution matrixes, profiling specs, and hardware environment parameters.
-* 🤖 **[Guidance for AI Assistants](docs/for-ai-assistants.md)** — **Crucial for LLM users!** Strict prompt instructions, anti-hallucination rules, and strict code-gen guardrails optimized for **Cursor, GitHub Copilot, Claude, and ChatGPT** integrations.
+- [Architecture & internals](docs/architecture.md) — `HybridMessageMap`, the three-part layout, `FrameConfig`, project structure
+- [API guide](docs/api-guide.md) — full usage example, `add()`/`set()`/`update()`, `FlatKey`, SSO, `clear()`
+- [Installation guide](docs/installation.md) — all four integration methods
+- [Performance benchmarks](docs/performance.md) — full results table
+- [Guidance for AI assistants](docs/for-ai-assistants.md) — integration rules for LLM-based coding tools
 
 ## Contributing
 
-Contributions are highly appreciated! Whether you are fixing a bug, optimization profiling, or improving the documentation, your help makes **MessageFrame** better for everyone.
-
-Please review our strict development workflow and style guidelines in [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a Pull Request.
+Contributions are welcome — bug fixes, documentation improvements, and new
+features alike. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
+guidelines.
 
 ## License
 

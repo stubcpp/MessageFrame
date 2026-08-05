@@ -1,71 +1,71 @@
 # Performance Benchmarks
 
-*Tested on: Intel Core 7 240H, Ubuntu 22.04 (x64 Release, GCC).*
-*Test Framework: Evaluated via `benchmarks/benchmark.cpp --iterations 200000 --params N`. Figures below reflect typical real-world performance results, not single best-case outliers. Run-to-run variance on this hardware environment is roughly ±10%.*
+*Tested on: Intel Core 7 240H, Ubuntu 22.04 (x64 Release, GCC), via
+`benchmarks/benchmark.cpp`. Figures below reflect the complete end-to-end
+lifecycle (parameter **addition + serialization + deserialization**). Run-to-run
+variance on this hardware is roughly ±10%. Iteration counts differ per scenario
+to keep total run time reasonable; each scenario lists the exact command used.*
 
----
+MessageFrame adapts its storage to the parameter count: up to 128
+parameters it uses a flat, allocation-free `std::vector`; beyond that it
+switches to a `tsl::robin_map`, which can additionally be pre-sized via
+`FrameConfig` (see [architecture.md](architecture.md#sizing-hint-via-frameconfig-optional)).
 
-## 📈 Executive Summary
+## Scenario A: small frame (4 parameters)
 
-`MessageFrame` achieves massive throughput lines by adapting its underlying storage topography to the data size. For small messages (up to 128 elements), it leverages a contiguous, allocation-free `std::vector`. For larger messages, it transitions to a fast, open-addressing `tsl::robin_map`, which can be further optimized using an initialization sizing hint.
+`--iterations 1000000 --params 4`. Header + 4 parameters, no attachment.
 
----
+| Metric | Value |
+|---|---|
+| Avg time per message | 0.678 us |
+| Throughput | 1,473,936 messages/sec (119.3 MB/sec) |
+| Avg packed size | 84 bytes |
+| `add` / `serialize` / `deserialize` | 0.10 us / 0.16 us / 0.32 us |
 
-## 🏎️ Scenario A: Small Frame (4 parameters)
-*Topology: Fixed Header + 4 scalar telemetry metrics, zero attachments.*
-*Primary Mode: Flat, cache-local sequential array.*
+## Scenario B: peak vector streaming (127 parameters)
 
-| Metric | Measured Value |
-| :--- | :--- |
-| **Avg Time per Message (Full Cycle)** | **0.678 μs** |
-| **Network Throughput** | ~1,473,936 messages/sec (**119.30 MB/sec**) |
-| **Avg Packed Frame Size** | 84 bytes |
-| **Microsecond Call Split** (`add` / `serialize` / `deserialize`) | 0.10 μs / 0.16 μs / 0.32 μs |
+`--iterations 1000000 --params 127`. Header + 127 parameters — right at
+the ceiling of vector-mode storage, without entering the hash map.
 
----
+| Metric | Value |
+|---|---|
+| Avg time per message | 10.41 us |
+| Throughput | 96,009 messages/sec (190.07 MB/sec) |
+| Avg packed size | 2,075 bytes |
+| `add` / `serialize` / `deserialize` | 2.81 us / 2.66 us / 4.54 us |
 
-## 🛹 Scenario B: Peak Vector Streaming (127 parameters)
-*Topology: Fixed Header + 127 metrics, zero attachments.*
-*Primary Mode: Operating at the absolute ceiling threshold of the cache-friendly flat array, just before triggering hashing routines.*
+## Scenario C: large frame (150 parameters)
 
-| Metric | Measured Value |
-| :--- | :--- |
-| **Avg Time per Message (Full Cycle)** | **10.410 μs** |
-| **Network Throughput** | ~96,009 messages/sec (**190.07 MB/sec**) |
-| **Avg Packed Frame Size** | 2,075 bytes |
-| **Microsecond Call Split** (`add` / `serialize` / `deserialize`) | 2.81 μs / 2.66 μs / 4.54 μs |
+`--iterations 1000000 --params 150`. Header + 150 parameters — past
+`SMALL_CAPACITY`, so the container has switched to hash-map mode.
 
----
+| Metric | Value |
+|---|---|
+| Avg time per message | 22.03 us |
+| Throughput | 45,402 messages/sec (107.8 MB/sec) |
+| Avg packed size | 2,488 bytes |
+| `add` / `serialize` / `deserialize` | 8.47 us / 3.45 us / 8.98 us |
 
-## ⚡ Scenario C: Large Frame (150 parameters)
-*Topology: Fixed Header + 150 parameters.*
-*Primary Mode: Automated runtime container migration to `tsl::robin_map` (open-addressing hash table) triggered at the 129th parameter.*
+## Scenario D: large frame with sizing hint (1024 parameters, `--reserve 1024`)
 
-| Metric | Measured Value |
-| :--- | :--- |
-| **Avg Time per Message (Full Cycle)** | **22.030 μs** |
-| **Network Throughput** | ~45,402 messages/sec (**107.80 MB/sec**) |
-| **Avg Packed Frame Size** | 2,488 bytes |
-| **Microsecond Call Split** (`add` / `serialize` / `deserialize`) | 8.47 μs / 3.45 μs / 8.98 μs |
+`--iterations 200000 --params 1024`, run once with `--reserve 0` and once
+with `--reserve 1024`. This isolates the cost of the vector-to-map
+migration that a sizing hint lets you skip.
 
----
+| Metric | Without hint (`--reserve 0`) | With hint (`--reserve 1024`) | Change |
+|---|---|---|---|
+| Avg time per message | 219.43 us | 173.72 us | -21% |
+| Throughput | 82.63 MB/sec | 104.37 MB/sec | +26% |
+| Avg packed size | 19,012 bytes | 19,012 bytes | unchanged |
+| `sum_add` (parameter insertion) | 88.14 us | 41.09 us | -53% |
+| `sum_find` (worst case: last-inserted key) | 0.06 us | 0.06 us | unchanged |
+| `sum_serialize` | 28.10 us | 27.37 us | roughly unchanged |
+| `sum_deserialize` | 85.03 us | 85.10 us | roughly unchanged |
 
-## 🚀 Scenario D: Massive Frame Optimization (1024 parameters)
-*Topology: Fixed Header + 1024 parameters. This scenario demonstrates the explicit cost of dynamic on-the-fly table reallocation versus an optimized pre-allocated sizing hint.*
-
-When your application handles wide messages containing hundreds or thousands of keys, allowing the container to start in vector mode and dynamically scale up causes noticeable heap thrashing and bucket rehashing. By passing a `FrameConfig::initial_reserve = 1024` hint, the framework instantly provisions the hash table, keeping execution paths optimized and allocation-free.
-
-| Performance Metric | Default Behavior (`--reserve 0`) | Sized Hint Applied (`--reserve 1024`) | Performance Delta |
-| :--- | :---: | :---: | :---: |
-| **Avg Time per Message** | 219.429 μs | **173.725 μs** | 📈 **20.83% Faster** |
-| **Message Processing Rate** | 4,557 msgs/sec | **5,756 msgs/sec** | ⚡ **+1,199 msgs/sec** |
-| **Effective Throughput** | 82.63 MB/sec | **104.37 MB/sec** | 🚀 **+21.74 MB/sec** |
-| **Avg Packed Frame Size** | 19,012 bytes | **19,012 bytes** | Unchanged |
-| **Parameter Insertion (`sum_add`)** | 88.14 μs | **41.09 μs** | 🔥 **53.38% Faster** |
-| **Point Lookup (`sum_find` worst-case)**| 0.06 μs | **0.06 μs** | Stable $O(1)$ efficiency |
-| **Encoding Cost (`sum_serialize`)** | 28.10 μs | **27.37 μs** | Identical code paths |
-| **Decoding Cost (`sum_deserialize`)** | 85.03 μs | **85.10 μs** | Identical code paths |
-
-### 🔍 Architectural Analysis of Scenario D:
-* **The `sum_add` Breakthrough:** Pre-allocating slots for `tsl::robin_map` shrinks the execution costs of element insertion from **88.14 μs down to 41.09 μs** — a **53.38% gain** achieved solely by bypassing the vector-fill stage and preventing sequential memory re-allocations on the heap.
-* **Point Lookup Resiliency:** Point lookups (`find()`) remain highly optimal at exactly **60 nanoseconds (`0.06 μs`)** even for the very last inserted element in a table of 1024 keys. This proves that Robin Hood hashing and contiguous internal bucket arrays maintain exceptional L1/L2 cache line hits.
+The improvement is concentrated in `sum_add`: with the hint, the container
+starts directly in map mode sized for 1024 entries, so it never fills a
+vector to `SMALL_CAPACITY` and migrates it. `serialize`/`deserialize` cost
+is unaffected either way, since it depends only on the final parameter
+count, not on how the container got there. Point lookups stay at ~60 ns
+regardless of the hint, since `tsl::robin_map`'s contiguous bucket layout
+gives O(1) lookups either way.
