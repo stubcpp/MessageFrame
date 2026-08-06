@@ -121,7 +121,7 @@ A full walkthrough — header configuration, attachments, iteration,
 — is in the [API guide](docs/api-guide.md).
 
 ## Cross-Language Interoperability
-MessageFrame frames can be instantly parsed in **Python, Go, Rust or Node.js** without using this library. Check out the [Cross-Platform Compatibility Guide](cross_platform_compatibility.md) for ready-to-use receiver scripts.
+MessageFrame frames can be instantly parsed in **Python, Go, Rust or Node.js** without using this library. Check out the [Cross-Platform Compatibility Guide](docs/cross_platform_compatibility.md) for ready-to-use receiver scripts.
 
 ## Installation
 
