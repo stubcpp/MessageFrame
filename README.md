@@ -172,6 +172,7 @@ chained nodes. Full results and methodology are in the
 - [Architecture & internals](docs/architecture.md) — `HybridMessageMap`, the three-part layout, `FrameConfig`, project structure
 - [API guide](docs/api-guide.md) — full usage example, `add()`/`set()`/`update()`, `FlatKey`, SSO, `clear()`
 - [Installation guide](docs/installation.md) — all four integration methods
+- [Cross-Platform Compatibility Guide](docs/cross_platform_compatibility.md) — Cross-Language Interoperability
 - [Performance benchmarks](docs/performance.md) — full results table
 - [Guidance for AI assistants](docs/for-ai-assistants.md) — integration rules for LLM-based coding tools
 
