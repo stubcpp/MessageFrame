@@ -10,12 +10,38 @@ Any language with a MessagePack library (Python, Go, Node.js, Rust, etc.) can na
 
 When `MessageFrame::serialize()` is called, it packs everything into a **top-level MessagePack Array of exactly 3 elements**:
 ```text
-[[Header Data],         // Element 0: Message ID, Message Type, Source, Target, Counter
-{Parameter Map},        // Element 1: Device and sensor metadata/values
+[[Header Data],         // Element 0: 8-element array — timestamp, msg_cnt, source, target, msg_id, msg_type, version, flags
+{Parameter Map},        // Element 1: FLAT map, see below
 [Binary Attachments]    // Element 2: Array of pairs [ [Name, Raw Binary], ... ]
 ]
 ```
 This predictable layout allows non-C++ readers to skip parts of the message they don't need or route heavy binary payloads efficiently without full parsing overhead.
+
+### Parameter map is flat, not nested
+
+The `device`/`parameter` split you see in the C++ API (`msg.add("sdr", "gain", ...)`) only exists on the C++ side. On the wire, `HybridMessageMap::pack()` writes a single **flat** MessagePack map. Each key is one string combining device and parameter, joined by **`0x1F`** (ASCII *Unit Separator*, not a dot):
+
+```
+{
+  "sdr\x1Fgain":        [20, 10.0],
+  "device_core\x1Ffw_version": [30, "v3.2.1"]
+}
+```
+
+So `parameters["sdr"]["gain"]` is wrong on every platform — there is no nested `"sdr"` object. You need to split each key on `0x1F` yourself.
+
+### Values are tagged, not raw
+
+Each value is packed as a **2-element array** `[type_tag, value]`, not a bare scalar:
+
+| `type_tag` | C++ type |
+|---|---|
+| `10` | `Int64` |
+| `20` | `Double` |
+| `30` | `String` |
+| `40` | `Bool` |
+
+So `10.0` on the wire actually looks like `[20, 10.0]`, and you need `value[1]` (optionally checking `value[0]` if you care about the type) to get the real number.
 
 ---
 
@@ -32,26 +58,29 @@ pip install msgpack
 ```python
 import msgpack
 
-def parse_message_frame(raw_bytes: bytes):
-    # Unpack into standard Python lists/dicts
-    # use_list=True keeps the order and array representation
-    frame = msgpack.unpackb(raw_bytes, use_list=True)
+SEPARATOR = "\x1f"  # ASCII Unit Separator — the real device/parameter delimiter
 
-    # 1. Extract Top-Level Elements
+TYPE_INT64, TYPE_DOUBLE, TYPE_STRING, TYPE_BOOL = 10, 20, 30, 40
+
+def parse_message_frame(raw_bytes: bytes):
+    frame = msgpack.unpackb(raw_bytes, use_list=True, raw=False)
+
     header      = frame[0]
-    parameters  = frame[1]
+    parameters  = frame[1]   # FLAT map: "device\x1Fparameter" -> [type_tag, value]
     attachments = frame[2]
 
-    # 2. Work with Parameters
-    # Accessing msg.add("sdr", "gain", msgframe::VALUE(10.0))
-    if "sdr" in parameters and "gain" in parameters["sdr"]:
-        gain_value = parameters["sdr"]["gain"]
-        print(f"SDR Gain: {gain_value}")
+    # 1. Work with parameters — split the flat key, unwrap the tagged value
+    for flat_key, tagged_value in parameters.items():
+        device, param = flat_key.split(SEPARATOR, 1)
+        type_tag, value = tagged_value
 
-    # 3. Handle Zero-Copy Binary Attachments
+        if device == "sdr" and param == "gain":
+            print(f"SDR Gain: {value} (type_tag={type_tag})")
+
+    # 2. Handle Zero-Copy Binary Attachments
     for attach in attachments:
         name = attach[0]
-        raw_data = attach[1] # This is a native Python 'bytes' object
+        raw_data = attach[1]  # native Python 'bytes' object
         print(f"Attachment Received: '{name}' | Size: {len(raw_data)} bytes")
 
 # Usage Example (Assuming raw_bytes came from a socket or MQTT broker)
@@ -62,7 +91,7 @@ def parse_message_frame(raw_bytes: bytes):
 
 ## Decoding in Go (Golang)
 
-Go is widely used in high-performance cloud gateways and IoT brokers. You can easily decode the C++ generated stream using the popular `vmihailenco/msgpack` or `tinylib/msgp` packages.
+Go is widely used in high-performance cloud gateways and IoT brokers. You can easily decode the C++ generated stream using the popular `vmihailenco/msgpack` package.
 
 ### Code Example
 ```go
@@ -71,31 +100,47 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
-	"://github.com"
+	"github.com/vmihailenco/msgpack/v5"
+)
+
+const separator = "\x1f" // ASCII Unit Separator
+
+const (
+	TypeInt64  = 10
+	TypeDouble = 20
+	TypeString = 30
+	TypeBool   = 40
 )
 
 func parseMessageFrame(payload []byte) {
-	// Unpack into a generic slice representing the top-level array(3)
 	var frame []interface{}
-	err := msgpack.Unmarshal(payload, &frame)
-	if err != nil {
+	if err := msgpack.Unmarshal(payload, &frame); err != nil {
 		log.Fatalf("Failed to unpack frame: %v", err)
 	}
 
-	// 1. Extract Elements
-	// elements are typed as interface{}, so we cast them to check schemas
+	// Parameters: a FLAT map, keys are "device\x1Fparameter"
 	parameters := frame[1].(map[string]interface{})
 	attachments := frame[2].([]interface{})
 
-	// 2. Read Parameters
-	if sdr, ok := parameters["sdr"].(map[string]interface{}); ok {
-		if gain, found := sdr["gain"]; found {
-			fmt.Printf("SDR Gain: %v\n", gain)
+	// 1. Read Parameters — split key, unwrap [type_tag, value]
+	for flatKey, tagged := range parameters {
+		parts := strings.SplitN(flatKey, separator, 2)
+		if len(parts) != 2 {
+			continue
+		}
+		device, param := parts[0], parts[1]
+
+		pair := tagged.([]interface{})
+		typeTag, value := pair[0], pair[1]
+
+		if device == "sdr" && param == "gain" {
+			fmt.Printf("SDR Gain: %v (type_tag=%v)\n", value, typeTag)
 		}
 	}
 
-	// 3. Process Binary Attachments
+	// 2. Process Binary Attachments
 	for _, att := range attachments {
 		pair := att.([]interface{})
 		name := pair[0].(string)
@@ -120,24 +165,29 @@ npm install @msgpack/msgpack
 ```javascript
 const { decode } = require("@msgpack/msgpack");
 
+const SEPARATOR = "\x1f"; // ASCII Unit Separator — the real device/parameter delimiter
+
 function parseMessageFrame(buffer) {
-    // Decode the binary buffer (e.g., from a TCP socket or MQTT broker)
     const frame = decode(buffer);
 
-    // 1. Extract Top-Level Elements (Array of 3 elements)
     const header      = frame[0];
-    const parameters  = frame[1];
+    const parameters  = frame[1]; // FLAT object: "device\x1Fparameter" -> [type_tag, value]
     const attachments = frame[2];
 
-    // 2. Read Parameters Dynamically
-    if (parameters.sdr && parameters.sdr.gain !== undefined) {
-        console.log(`SDR Gain: ${parameters.sdr.gain}`);
+    // 1. Read Parameters — split each flat key, unwrap the tagged value
+    for (const [flatKey, tagged] of Object.entries(parameters)) {
+        const [device, param] = flatKey.split(SEPARATOR);
+        const [typeTag, value] = tagged;
+
+        if (device === "sdr" && param === "gain") {
+            console.log(`SDR Gain: ${value} (type_tag=${typeTag})`);
+        }
     }
 
-    // 3. Process Zero-Copy Binary Attachments
+    // 2. Process Zero-Copy Binary Attachments
     attachments.forEach(attach => {
         const name = attach[0];
-        const rawData = attach[1]; // Automatically parsed as a native Uint8Array
+        const rawData = attach[1]; // native Uint8Array
 
         console.log(`Attachment: '${name}' | Size: ${rawData.byteLength} bytes`);
     });
@@ -148,13 +198,14 @@ function parseMessageFrame(buffer) {
 
 ## Decoding in Rust
 
-Rust provides excellent safety and blazing-fast performance for decoding network streams. You can easily unpack the MessageFrame byte arrays into dynamic values using the standard `rmp-serde` crate.
+Rust provides excellent safety and blazing-fast performance for decoding network streams. You can easily unpack the MessageFrame byte arrays using the standard `rmp-serde` crate.
 
 ### Prerequisites
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 rmp-serde = "1.3"
+rmpv = { version = "1", features = ["with-serde"] }
 serde = { version = "1.0", features = ["derive"] }
 ```
 
@@ -162,26 +213,34 @@ serde = { version = "1.0", features = ["derive"] }
 ```rust
 use std::collections::HashMap;
 
+const TYPE_INT64: u8 = 10;
+const TYPE_DOUBLE: u8 = 20;
+const TYPE_STRING: u8 = 30;
+const TYPE_BOOL: u8 = 40;
+const SEPARATOR: char = '\u{1F}'; // ASCII Unit Separator
+
 fn parse_message_frame(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    // Define the type matching your top-level Array(3) layout
-    // 0: Header (skipped as generic Value here), 1: Params Map, 2: Attachments Array
+    // 0: Header (8-element array, kept generic here)
+    // 1: Parameters — a FLAT map: "device\x1Fparameter" -> [type_tag, value]
+    // 2: Attachments — array of [name, raw_bytes] pairs
     type FrameLayout = (
         rmpv::Value,
-        HashMap<String, HashMap<String, rmpv::Value>>,
-        Vec<(String, Vec<u8>)>
+        HashMap<String, (u8, rmpv::Value)>,
+        Vec<(String, Vec<u8>)>,
     );
 
-    // Unpack directly from the byte slice
     let (_header, parameters, attachments): FrameLayout = rmp_serde::from_slice(payload)?;
 
-    // 1. Read Parameters Safely
-    if let Some(sdr_device) = parameters.get("sdr") {
-        if let Some(gain_val) = sdr_device.get("gain") {
-            println!("SDR Gain: {:?}", gain_val);
+    // 1. Read Parameters — split the flat key, unwrap the tagged value
+    for (flat_key, (type_tag, value)) in &parameters {
+        if let Some((device, param)) = flat_key.split_once(SEPARATOR) {
+            if device == "sdr" && param == "gain" {
+                println!("SDR Gain: {:?} (type_tag={})", value, type_tag);
+            }
         }
     }
 
-    // 2. Process Binary Attachments (zero allocation strings, raw byte arrays)
+    // 2. Process Binary Attachments
     for (name, raw_data) in attachments {
         println!("Attachment: '{}' | Size: {} bytes", name, raw_data.len());
     }
@@ -189,6 +248,7 @@ fn parse_message_frame(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 ```
+
 ---
 
 ## 🎯 Advantages for Distributed Teams
